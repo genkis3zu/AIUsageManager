@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -22,6 +23,7 @@ namespace AIUsageManager
         readonly RegisteredWaitHandle showWait;
         readonly ContextMenuStrip menu = new ContextMenuStrip();
         readonly ToolStripMenuItem themeMenu = new ToolStripMenuItem("テーマ");
+        readonly ToolStripMenuItem widgetMenu = new ToolStripMenuItem("Windows ウィジェット");
         readonly ThemeSettings settings;
         ThemeMode themeMode;
         bool refreshing, exiting;
@@ -42,6 +44,11 @@ namespace AIUsageManager
             AddThemeChoice("ライト",ThemeMode.Light);
             AddThemeChoice("ダーク",ThemeMode.Dark);
             menu.Items.Add(themeMenu);
+            widgetMenu.DropDownItems.Add("ウィジェットを開く",null,(s,e)=>OpenWidgetLink("ms-widgets:"));
+            widgetMenu.DropDownItems.Add("追加・削除の手順",null,(s,e)=>MessageBox.Show(
+                "登録済み: Win+W → ＋ → AI Usage Manager を追加します。\n右上の … から中／大サイズを選べます。\n\n未登録: ウィジェット用ZIPを展開し、install-widgets.ps1 をWindows PowerShellで実行します。\n削除: 同梱の uninstall-widgets.ps1 を実行します。\n\n必要: Windows 11 x64、Windows App Runtime 2.5.1 x64以降、開発者モード。\n詳しくはウィジェット用ZIPのREADME.mdを参照してください。",
+                "Windows ウィジェット",MessageBoxButtons.OK,MessageBoxIcon.Information));
+            menu.Items.Add(widgetMenu);
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("終了",null,(s,e)=>ExitThread());
             ApplyTheme();
@@ -69,6 +76,11 @@ namespace AIUsageManager
             };
             themeMenu.DropDownItems.Add(item);
         }
+        void OpenWidgetLink(string target)
+        {
+            try { Process.Start(new ProcessStartInfo(target) { UseShellExecute=true }); }
+            catch { tray.ShowBalloonTip(4000,"Windows ウィジェット","開けませんでした。Win+Wでウィジェットを開いてください。追加手順はGitHubのREADMEから確認できます。",ToolTipIcon.Info); }
+        }
         void ApplyTheme()
         {
             if(exiting)return;
@@ -77,6 +89,7 @@ namespace AIUsageManager
             var renderer=new ThemeMenuRenderer(palette);
             menu.Renderer=renderer;menu.BackColor=palette.Surface;menu.ForeColor=palette.Ink;
             themeMenu.DropDown.Renderer=renderer;themeMenu.DropDown.BackColor=palette.Surface;themeMenu.DropDown.ForeColor=palette.Ink;
+            widgetMenu.DropDown.Renderer=renderer;widgetMenu.DropDown.BackColor=palette.Surface;widgetMenu.DropDown.ForeColor=palette.Ink;
             foreach(ToolStripMenuItem item in themeMenu.DropDownItems)item.Checked=(ThemeMode)item.Tag==themeMode;
             menu.Invalidate(true);themeMenu.DropDown.Invalidate(true);
         }

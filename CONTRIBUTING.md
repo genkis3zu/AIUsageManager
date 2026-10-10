@@ -1,6 +1,6 @@
 # 開発・貢献ガイド
 
-Windows 11、Windows PowerShell 5.1、標準搭載の.NET Framework 4.8以降を使用します。SDKやNuGetの復元は不要です。
+トレイ版にはWindows 11、Windows PowerShell 5.1、標準搭載の.NET Framework 4.8以降を使用します。トレイ版のSDKやNuGetの復元は不要です。
 
 ## ビルドとテスト
 
@@ -50,6 +50,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\generate-icon.ps
 公開Issueには再現手順、Windowsのバージョン、アプリのバージョンを記載してください。認証ファイルや生ログは不要です。機密情報の扱いに関する問題は [SECURITY.md](SECURITY.md) の方法で報告してください。
 
 ## リリースZIP
+
+### ウィジェット
+
+[追加・開発手順](docs/widgets-guide.md) に前提条件と登録コマンドがあります。ネイティブ側はC++20 / C++/WinRT、静的CRTでビルドします。`tools/build-widgets.ps1` は固定バージョンのWidgetsメタデータを取得しSHA-256を検証します。SDKやWindows App RuntimeのDLLをZIPへ再配布しません。
+
+`build/widgets/NativeTests.exe` は状態管理、子プロセスの終了・出力上限、実アプリの架空カードを検証します。インストール後の `--check-installed` は実際のCOM起動とWidgetManagerの解決を検証します。実際のピン留め、サイズ変更、更新、アプリを開く操作はWindowsのボードで確認してください。
+
+`tools/package-widgets.ps1` が12個の許可したファイルだけをZIPにします。`build/widgets` 全体を圧縮するとテスト用実行ファイル・オブジェクトが混ざるため、必ず配布スクリプトを使ってください。
+
+### トレイ版
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package.ps1

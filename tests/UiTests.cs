@@ -67,6 +67,7 @@ internal static class UiTests
                 var popup=Field<PopupForm>(context,"popup");var refresh=Field<Button>(popup,"refresh");
                 var timer=Field<System.Windows.Forms.Timer>(context,"refreshTimer");
                 var themes=Field<ToolStripMenuItem>(context,"themeMenu");var menu=Field<ContextMenuStrip>(context,"menu");
+                var widgets=Field<ToolStripMenuItem>(context,"widgetMenu");
                 var dark=(ToolStripMenuItem)themes.DropDownItems[2];var light=(ToolStripMenuItem)themes.DropDownItems[1];var automatic=(ToolStripMenuItem)themes.DropDownItems[0];
                 var darkPalette=ThemePalette.Resolve(ThemeMode.Dark);var lightPalette=ThemePalette.Resolve(ThemeMode.Light);
                 Assert(dark.Checked&&popup.BackColor==darkPalette.Surface,"Startup restores selected dark appearance");
@@ -79,6 +80,7 @@ internal static class UiTests
                 light.PerformClick();
                 Assert(light.Checked&&!dark.Checked&&!automatic.Checked&&popup.BackColor==lightPalette.Surface&&settings.Load()==ThemeMode.Light,"Menu immediately applies and saves light appearance");
                 Assert(menu.BackColor==lightPalette.Surface&&themes.DropDown.BackColor==lightPalette.Surface,"Both menu levels follow selected appearance");
+                Assert(widgets.DropDownItems.Count==2&&widgets.DropDown.BackColor==lightPalette.Surface,"Widget actions are available and follow the selected appearance");
                 automatic.PerformClick();
                 Assert(automatic.Checked&&!light.Checked&&!dark.Checked&&settings.Load()==ThemeMode.System,"Automatic appearance is independently selectable and saved");
                 var systemPalette=ThemePalette.Resolve(ThemeMode.System);

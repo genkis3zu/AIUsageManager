@@ -12,4 +12,10 @@ jobs:
           persist-credentials: false
       - name: Build and run offline fixture tests
         shell: powershell
-        run: .\build.ps1 -NoPublish
+        run: .\build.ps1 -NoPublish -OutputDirectory build\widget-core
+      - name: Build native widget provider and run transport tests
+        shell: powershell
+        run: .\tools\build-widgets.ps1 -SkipCoreBuild
+      - name: Verify allowlisted widget package
+        shell: powershell
+        run: .\tools\package-widgets.ps1 -SkipBuild

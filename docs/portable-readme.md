@@ -1,4 +1,4 @@
-# AI Usage Manager 1.0.0
+# AI Usage Manager 1.1.0
 
 Claude・Codex・Grokの使用量を表示するWindows 11用トレイアプリです。
 
@@ -12,6 +12,7 @@ Claude・Codex・Grokの使用量を表示するWindows 11用トレイアプリ�
 
 対応CLIの既存ログインや利用記録が必要です。値がなければ「未取得」になります。
 Windows標準の.NET Frameworkを使用し、追加ランタイムや管理者権限は不要です。
+Windowsウィジェットは別のオプションパッケージです。追加手順はGitHubのREADMEを参照してください。
 配布ファイルはコード署名されていません。公式ReleaseとSHA-256を確認してください。
 
 ログ・認証ファイルは読み取り専用です。テーマ選択だけをsettings.iniへ保存します。
