@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 32 32">
+  <title>AI Usage Manager</title>
+  <rect x="1" y="1" width="30" height="30" rx="8" fill="#242a35"/>
+  <rect x="7" y="16" width="4" height="10" rx="2" fill="#f5f7fa"/>
+  <rect x="14" y="7" width="4" height="19" rx="2" fill="#81b2ff"/>
+  <rect x="21" y="12" width="4" height="14" rx="2" fill="#f5f7fa"/>
+</svg>
