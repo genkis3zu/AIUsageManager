@@ -15,29 +15,49 @@ namespace AIUsageManager
         public ThemeSettings(string path) { this.path = path; }
         public static ThemeSettings Default()
         { return new ThemeSettings(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.ini")); }
-        public ThemeMode Load()
+        string ReadSettings()
         {
             try
             {
                 using (var reader = new StreamReader(path))
                 {
-                    char[] buffer = new char[32];
-                    string text = new string(buffer, 0, reader.ReadBlock(buffer, 0, buffer.Length)).Trim();
-                    if (text == "theme=dark") return ThemeMode.Dark;
-                    if (text == "theme=light") return ThemeMode.Light;
+                    char[] buffer = new char[4097];
+                    int read=reader.ReadBlock(buffer,0,buffer.Length);
+                    return read>4096?"":new string(buffer,0,read);
                 }
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
             catch (SecurityException) { }
+            return "";
+        }
+        public ThemeMode Load()
+        {
+            foreach(string line in ReadSettings().Split('\n')) {
+                if(line.Trim()=="theme=dark")return ThemeMode.Dark;
+                if(line.Trim()=="theme=light")return ThemeMode.Light;
+            }
             return ThemeMode.System;
         }
+        public NotificationMode LoadNotifications()
+        {
+            foreach(string line in ReadSettings().Split('\n')) {
+                if(line.Trim()=="notifications=off")return NotificationMode.Off;
+                if(line.Trim()=="notifications=thresholds")return NotificationMode.Thresholds;
+            }
+            return NotificationMode.All;
+        }
         public bool Save(ThemeMode mode)
+        { return Save(mode,LoadNotifications()); }
+        public bool SaveNotifications(NotificationMode mode)
+        { return Save(Load(),mode); }
+        bool Save(ThemeMode mode,NotificationMode notifications)
         {
             string value = mode == ThemeMode.Dark ? "dark" : mode == ThemeMode.Light ? "light" : "system";
+            string alertValue=notifications==NotificationMode.Off?"off":notifications==NotificationMode.Thresholds?"thresholds":"all";
             try
             {
-                File.WriteAllText(path + ".tmp", "theme=" + value + Environment.NewLine);
+                File.WriteAllText(path + ".tmp", "theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine);
                 if (File.Exists(path)) File.Replace(path + ".tmp", path, null);
                 else File.Move(path + ".tmp", path);
                 return true;

@@ -27,8 +27,12 @@ namespace AIUsageManager
         readonly ThemeSettings settings;
         readonly ILoginLauncher loginLauncher;
         readonly ToolStripMenuItem loginMenu = new ToolStripMenuItem("ログイン");
+        readonly ToolStripMenuItem notificationMenu = new ToolStripMenuItem("通知");
+        readonly UsageAlerts alerts = new UsageAlerts();
+        readonly Action<string> notify;
         readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[2];
         ThemeMode themeMode;
+        NotificationMode notificationMode;
         bool refreshing, exiting, loggingIn;
         DateTimeOffset? nextRefresh;
         public TrayContext(bool show, EventWaitHandle signal) : this(show, signal, null) { }
@@ -36,14 +40,18 @@ namespace AIUsageManager
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings)
             : this(show,signal,source,themeSettings,new LoginLauncher(),null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals)
+            : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
         {
             loginLauncher=launcher;
-            settings=themeSettings;themeMode=settings.Load();
+            settings=themeSettings;themeMode=settings.Load();notificationMode=settings.LoadNotifications();
             service = source ?? new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), http);
             showEvent=signal;
             // Create the native handle before scheduling messages onto the UI thread.
             IntPtr handle=popup.Handle;
             tray=new NotifyIcon { Icon=Artwork.TrayIcon(),Text="AI Usage Manager",Visible=true,ContextMenuStrip=menu };
+            notify=notification??(text=>tray.ShowBalloonTip(8000,"AI 使用量の警告",text,ToolTipIcon.Warning));
+            tray.BalloonTipClicked+=(s,e)=>ShowPopup();
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
             menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
             foreach(string name in new[]{"Codex","Grok"}) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
@@ -52,6 +60,10 @@ namespace AIUsageManager
             AddThemeChoice("ライト",ThemeMode.Light);
             AddThemeChoice("ダーク",ThemeMode.Dark);
             menu.Items.Add(themeMenu);
+            AddNotificationChoice("上限・急増・到達予測",NotificationMode.All);
+            AddNotificationChoice("90%・95%・100%のみ",NotificationMode.Thresholds);
+            AddNotificationChoice("通知しない（画面には表示）",NotificationMode.Off);
+            menu.Items.Add(notificationMenu);
             widgetMenu.DropDownItems.Add("ウィジェットを開く",null,(s,e)=>OpenWidgetLink("ms-widgets:"));
             widgetMenu.DropDownItems.Add("追加・削除の手順",null,(s,e)=>MessageBox.Show(
                 "登録済み: Win+W → ＋ → AI Usage Manager を追加します。\n右上の … から中／大サイズを選べます。\n\n未登録: ウィジェット用ZIPを展開し、install-widgets.ps1 をWindows PowerShellで実行します。\n削除: 同梱の uninstall-widgets.ps1 を実行します。\n\n必要: Windows 11 x64、Windows App Runtime 2.5.1 x64以降、開発者モード。\n詳しくはウィジェット用ZIPのREADME.mdを参照してください。",
@@ -96,6 +108,15 @@ namespace AIUsageManager
             try { Process.Start(new ProcessStartInfo(target) { UseShellExecute=true }); }
             catch { tray.ShowBalloonTip(4000,"Windows ウィジェット","開けませんでした。Win+Wでウィジェットを開いてください。追加手順はGitHubのREADMEから確認できます。",ToolTipIcon.Info); }
         }
+        void AddNotificationChoice(string label,NotificationMode mode)
+        {
+            var item=new ToolStripMenuItem(label) { Tag=mode };
+            item.Click+=(s,e)=> {
+                notificationMode=mode;ApplyTheme();
+                if(!settings.SaveNotifications(mode))tray.ShowBalloonTip(4000,"通知の保存","設定を保存できませんでした。今回の起動中のみ適用します。",ToolTipIcon.Warning);
+            };
+            notificationMenu.DropDownItems.Add(item);
+        }
         void ApplyTheme()
         {
             if(exiting)return;
@@ -106,7 +127,9 @@ namespace AIUsageManager
             themeMenu.DropDown.Renderer=renderer;themeMenu.DropDown.BackColor=palette.Surface;themeMenu.DropDown.ForeColor=palette.Ink;
             widgetMenu.DropDown.Renderer=renderer;widgetMenu.DropDown.BackColor=palette.Surface;widgetMenu.DropDown.ForeColor=palette.Ink;
             loginMenu.DropDown.Renderer=renderer;loginMenu.DropDown.BackColor=palette.Surface;loginMenu.DropDown.ForeColor=palette.Ink;
+            notificationMenu.DropDown.Renderer=renderer;notificationMenu.DropDown.BackColor=palette.Surface;notificationMenu.DropDown.ForeColor=palette.Ink;
             foreach(ToolStripMenuItem item in themeMenu.DropDownItems)item.Checked=(ThemeMode)item.Tag==themeMode;
+            foreach(ToolStripMenuItem item in notificationMenu.DropDownItems)item.Checked=(NotificationMode)item.Tag==notificationMode;
             menu.Invalidate(true);themeMenu.DropDown.Invalidate(true);
         }
         void OnUserPreferenceChanged(object sender,UserPreferenceChangedEventArgs e)
@@ -136,9 +159,12 @@ namespace AIUsageManager
             {
                 var result=await service.FetchAllAsync(cancellation.Token);
                 if(exiting)return;
+                var notices=alerts.Observe(result,DateTimeOffset.Now,notificationMode);
                 popup.SetUsage(result);
                 string summary=string.Join(" | ",result.Select(r=>r.Name+" "+string.Join("/",r.Windows.Select(w=>UsageText.Percent(w.Percent)))));
                 tray.Text=summary.Length>63?summary.Substring(0,63):summary;
+                // OS notification delivery must never turn a successful fetch into an error.
+                if(notices.Length>0)try { notify(UsageAlerts.NotificationText(notices)); }catch(Exception) { }
             }
             catch(Exception)
             {

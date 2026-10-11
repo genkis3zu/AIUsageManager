@@ -28,6 +28,16 @@ internal static class Diagnostics
             var codex=ServiceUsage.Empty("Codex","");codex.Plan="Pro Lite";codex.Source="CLI 記録";codex.RecordedAt=now.AddHours(-3);codex.Windows[0].Percent=50;codex.Windows[0].ResetsAt=now.AddDays(3);
             var grok=ServiceUsage.Empty("Grok","");grok.Plan="SuperGrok Heavy";grok.Source="オンライン";grok.RecordedAt=now;grok.Windows[0].Percent=42;grok.Windows[0].ResetsAt=now.AddDays(2.5);
             values=new[]{claude,codex,grok};
+            if(args.Contains("--alerts")) {
+                var alerts=new UsageAlerts();
+                codex.Source="オンライン";
+                for(int i=0;i<3;i++) {
+                    foreach(var value in values)value.RecordedAt=now.AddMinutes(-10+5*i);
+                    claude.Windows[0].Percent=6;claude.Windows[1].Percent=100;
+                    codex.Windows[0].Percent=20+15*i;grok.Windows[0].Percent=89+3*i;
+                    alerts.Observe(values,now.AddMinutes(-10+5*i),NotificationMode.Off);
+                }
+            }
         }
         foreach(var value in values)
             Console.WriteLine(value.Name+" | "+value.Plan+" | "+string.Join(", ",value.Windows.Select(w=>w.Label+"="+UsageText.Percent(w.Percent)))+" | "+value.Source+" | "+(value.RecordedAt.HasValue?value.RecordedAt.Value.ToLocalTime().ToString("s"):"unknown time")+" | "+value.Status);
@@ -41,8 +51,8 @@ internal static class Diagnostics
             foreach(float scale in new[]{1f,1.5f,2f})
             {
                 typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,scale);
-                typeof(PopupForm).GetMethod("LayoutRows",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,null);
-                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,(args.Contains("--live")?"live":"sample")+"-"+theme+"-"+(int)(scale*100)+".png"),ImageFormat.Png);}
+                form.SetUsage(values);
+                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,(args.Contains("--live")?"live":args.Contains("--alerts")?"alerts":"sample")+"-"+theme+"-"+(int)(scale*100)+".png"),ImageFormat.Png);}
             }
             var missing=ServiceUsage.Empty("Claude","CLI で再ログインが必要です");
             var zero=ServiceUsage.Empty("Codex","");zero.Plan="Pro Lite";zero.Windows[0].Percent=0;zero.RecordedAt=DateTimeOffset.Now;

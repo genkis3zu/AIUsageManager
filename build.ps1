@@ -7,7 +7,7 @@ $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (!(Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 $refs = @('/r:System.dll','/r:System.Core.dll','/r:System.Web.Extensions.dll','/r:System.Net.Http.dll','/r:System.Drawing.dll','/r:System.Windows.Forms.dll')
 $core = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | Where-Object { $_.Name -notin @('Program.cs','PopupForm.cs','TrayContext.cs') } | ForEach-Object { $_.FullName })
-& $csc /nologo /utf8output /warn:4 /warnaserror /optimize+ /target:exe "/out:$out\Tests.exe" @refs @core "$root\tests\Tests.cs" "$root\tests\ProviderTests.cs" "$root\tests\WidgetTests.cs"
+& $csc /nologo /utf8output /warn:4 /warnaserror /optimize+ /target:exe "/out:$out\Tests.exe" @refs @core "$root\tests\Tests.cs" "$root\tests\ProviderTests.cs" "$root\tests\WidgetTests.cs" "$root\tests\AlertTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Test compile failed' }
 & "$out\Tests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }

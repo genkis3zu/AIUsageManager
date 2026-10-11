@@ -60,7 +60,11 @@ namespace AIUsageManager
             var title=O("type","ColumnSet","spacing","none","columns",new object[]{
                 O("type","Column","width","20px","items",new object[]{O("type","Image","url",Icon(value.Name),"width","20px","height","20px","altText",value.Name)}),
                 O("type","Column","width","stretch","spacing","small","items",new object[]{header})});
-            var items=new List<object>{title,O("type","ColumnSet","spacing","none","columns",columns),Text("取得 "+stamp+(large?" · "+source:""),"default",true)};
+            var alerts=UsageAlerts.ForDisplay(value,now);
+            string stampText="取得 "+stamp+(large?" · "+source:"");
+            if(!large&&alerts.Length>0)stampText=stamp+" · "+string.Join(" / ",alerts.Select(a=>a.Compact));
+            var items=new List<object>{title,O("type","ColumnSet","spacing","none","columns",columns),Text(stampText,!large&&alerts.Length>0?"attention":"default",!(!large&&alerts.Length>0))};
+            if(large&&alerts.Length>0)items.Add(O("type","TextBlock","text",string.Join("\n",alerts.Select(a=>a.Title)),"size","small","weight","bolder","spacing","none","wrap",true,"maxLines",2,"color","attention"));
             if(large&&!string.IsNullOrEmpty(value.Status))items.Add(O("type","TextBlock","text",value.Status,"size","small","spacing","none","wrap",true,"maxLines",2,"color","warning"));
             return O("type","Container","spacing",large?"medium":"small","separator",value.Name!="Claude","items",items);
         }

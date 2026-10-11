@@ -22,7 +22,7 @@ namespace AIUsageManager
                 login.Visible=value.NeedsLogin&&(value.Name=="Codex"||value.Name=="Grok");
                 login.AccessibleName=value.Name+" にログイン";
                 AccessibleName=value.Name+" "+value.Plan+" "+string.Join("、",value.Windows.Select(w=>w.Label+" "+UsageText.Percent(w.Percent)+" "+UsageText.Reset(w,DateTimeOffset.Now)));
-                AccessibleDescription=Stamp(value)+" "+value.Status+" "+value.PlanNote;
+                AccessibleDescription=Stamp(value)+" "+value.Status+" "+value.PlanNote+" "+string.Join("。",UsageAlerts.ForDisplay(value,DateTimeOffset.Now).Select(a=>a.Title+"。"+a.Detail));
                 Invalidate();
             }
         }
@@ -70,6 +70,18 @@ namespace AIUsageManager
             if(old)stamp+="  ·  保存された値";
             Artwork.Text(g,stamp,10,false,palette.Muted,new RectangleF(39,87,349,18),false);
             if(!string.IsNullOrEmpty(usage.Status))Artwork.Text(g,usage.Status,10,false,palette.Warning,new RectangleF(39,105,usage.NeedsLogin?253:349,18),false);
+            float warningTop=string.IsNullOrEmpty(usage.Status)?110:128;
+            foreach(var alert in UsageAlerts.ForDisplay(usage,DateTimeOffset.Now)) {
+                Color ink=alert.Threshold>=95?palette.Red:palette.Warning;
+                using(var background=new SolidBrush(Color.FromArgb(20,ink)))g.FillRectangle(background,39,warningTop,349,62);
+                using(var edge=new SolidBrush(ink))g.FillRectangle(edge,39,warningTop,3,62);
+                Artwork.Text(g,alert.Title,12,true,ink,new RectangleF(49,warningTop+6,331,20),false);
+                using(var font=new Font("Yu Gothic UI",10,FontStyle.Regular,GraphicsUnit.Pixel))
+                using(var brush=new SolidBrush(palette.Ink))
+                using(var format=new StringFormat {Trimming=StringTrimming.EllipsisCharacter})
+                    g.DrawString(alert.Detail,font,brush,new RectangleF(49,warningTop+27,329,32),format);
+                warningTop+=68;
+            }
             using(var pen=new Pen(palette.Separator))g.DrawLine(pen,39,Height/scale-1,388,Height/scale-1);
         }
     }
@@ -77,6 +89,7 @@ namespace AIUsageManager
     {
         readonly UsageRow[] rows={new UsageRow(),new UsageRow(),new UsageRow()};
         readonly Button refresh=new Button(),close=new Button();
+        readonly Panel content=new Panel {AutoScroll=true,TabStop=true,AccessibleName="サービスごとの使用量と警告"};
         readonly ToolTip tips=new ToolTip();
         readonly Icon windowIcon=Artwork.TrayIcon();
         ThemePalette palette=ThemePalette.Light;
@@ -91,7 +104,8 @@ namespace AIUsageManager
             Text="AI Usage Manager";Icon=windowIcon;FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;
             AutoScaleMode=AutoScaleMode.None;BackColor=Color.White;DoubleBuffered=true;KeyPreview=true;
             AccessibleName="AI 使用量";
-            foreach(var row in rows){Controls.Add(row);row.LoginRequested+=name=>{if(LoginRequested!=null)LoginRequested(name);};}
+            Controls.Add(content);
+            foreach(var row in rows){content.Controls.Add(row);row.LoginRequested+=name=>{if(LoginRequested!=null)LoginRequested(name);};}
             ConfigureButton(refresh,"更新", "使用量を更新 (F5)");ConfigureButton(close,"×","閉じる (Esc)");
             tips.OwnerDraw=true;
             tips.Draw+=(s,e)=> {
@@ -116,6 +130,7 @@ namespace AIUsageManager
         internal void ApplyTheme(ThemePalette value)
         {
             palette=value;BackColor=value.Surface;ForeColor=value.Ink;
+            content.BackColor=value.Surface;content.ForeColor=value.Ink;
             foreach(var row in rows)row.ApplyTheme(value);
             foreach(var button in new[]{refresh,close}) {
                 button.BackColor=value.Surface;button.ForeColor=value.Muted;
@@ -134,16 +149,21 @@ namespace AIUsageManager
         public void SetRefresh(bool isBusy,DateTimeOffset? next)
         {busy=isBusy;nextRefresh=next;refresh.Enabled=!busy;refresh.Text=busy?"更新中":"更新";Invalidate();}
         public void SetLoginBusy(bool value) { foreach(var row in rows)row.SetLoginBusy(value); }
-        public void TickDisplay() { if(Visible){foreach(var row in rows)row.Invalidate();Invalidate();} }
-        void LayoutRows()
+        public void TickDisplay() { if(Visible){SetUsage(rows.Select(row=>row.Usage).ToArray());} }
+        void LayoutRows() { LayoutRows(Screen.FromControl(this).WorkingArea); }
+        void LayoutRows(Rectangle area)
         {
-            int y=68;
-            foreach(var row in rows)
-            {
-                int height=string.IsNullOrEmpty(row.Usage.Status)?116:134;
-                row.SetBounds(P(16),P(y),P(388),P(height));y+=height;
-            }
-            ClientSize=new Size(P(420),P(y+44));
+            var heights=rows.Select(row=>(string.IsNullOrEmpty(row.Usage.Status)?116:134)+68*UsageAlerts.ForDisplay(row.Usage,DateTimeOffset.Now).Length).ToArray();
+            int total=heights.Sum(height=>P(height));
+            int available=Math.Max(P(80),area.Height-P(16)-P(112));
+            int viewport=Math.Min(total,available),y=0,scroll=-content.AutoScrollPosition.Y;
+            content.SuspendLayout();content.AutoScrollPosition=Point.Empty;
+            ClientSize=new Size(P(420),P(112)+viewport);
+            content.SetBounds(P(16),P(68),P(388),viewport);
+            int rowWidth=P(388)-(total>viewport?SystemInformation.VerticalScrollBarWidth:0);
+            for(int i=0;i<rows.Length;i++) { int height=P(heights[i]);rows[i].SetBounds(0,y,rowWidth,height);y+=height; }
+            content.AutoScrollMinSize=new Size(0,total);content.ResumeLayout();
+            content.AutoScrollPosition=new Point(0,Math.Min(scroll,Math.Max(0,total-viewport)));
             refresh.SetBounds(P(302),P(17),P(66),P(32));close.SetBounds(P(373),P(17),P(28),P(32));
             var old=refresh.Font;refresh.Font=new Font("Yu Gothic UI",9*scale);if(old!=Control.DefaultFont)old.Dispose();
             old=close.Font;close.Font=new Font("Segoe UI",14*scale);if(old!=Control.DefaultFont)old.Dispose();
@@ -153,7 +173,8 @@ namespace AIUsageManager
         {
             var monitor=MonitorFromPoint(anchor,2);uint x,y;
             try { if(GetDpiForMonitor(monitor,0,out x,out y)==0)scale=x/96f; }catch(DllNotFoundException){}catch(EntryPointNotFoundException){}
-            LayoutRows();var area=Screen.FromPoint(anchor).WorkingArea;
+            var area=Screen.FromPoint(anchor).WorkingArea;
+            scale=Math.Min(scale,(area.Width-16)/420f);LayoutRows(area);
             Location=new Point(Math.Max(area.Left+P(8),Math.Min(anchor.X-Width/2,area.Right-Width-P(8))),Math.Max(area.Top+P(8),Math.Min(anchor.Y-Height-P(10),area.Bottom-Height-P(8))));
             Show();Activate();refresh.Focus();
         }
@@ -161,6 +182,21 @@ namespace AIUsageManager
         {
             var area=Screen.FromControl(this).WorkingArea;
             Location=new Point(Math.Max(area.Left,Math.Min(Left,area.Right-Width)),Math.Max(area.Top,Math.Min(Top,area.Bottom-Height)));
+        }
+        protected override bool ProcessCmdKey(ref Message message,Keys keyData)
+        {
+            int maximum=content.AutoScrollMinSize.Height-content.ClientSize.Height;
+            if(maximum>0) {
+                int position=-content.AutoScrollPosition.Y;
+                int page=Math.Max(P(40),content.ClientSize.Height-P(24));
+                if(keyData==Keys.Home)position=0;
+                else if(keyData==Keys.End)position=maximum;
+                else if(keyData==Keys.PageDown)position+=page;
+                else if(keyData==Keys.PageUp)position-=page;
+                else return base.ProcessCmdKey(ref message,keyData);
+                content.AutoScrollPosition=new Point(0,Math.Max(0,Math.Min(position,maximum)));return true;
+            }
+            return base.ProcessCmdKey(ref message,keyData);
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {

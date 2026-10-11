@@ -10,6 +10,7 @@ namespace AIUsageManager
         public string Label;
         public double? Percent;
         public DateTimeOffset? ResetsAt;
+        public UsageAlert Alert;
         public UsageWindow(string label, double? percent, DateTimeOffset? resetsAt)
         { Label = label; Percent = percent; ResetsAt = resetsAt; }
     }

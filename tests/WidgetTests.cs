@@ -16,6 +16,12 @@ internal static partial class Tests
     }
     static void RunWidgetTests()
     {
+        Check("Both widget sizes explain high usage in words and ignore stale warnings",()=> {
+            var values=WidgetValues();foreach(var value in values){value.RecordedAt=T;value.Source="オンライン";foreach(var window in value.Windows){window.Percent=100;window.ResetsAt=T.AddDays(1);}}
+            var cards=Json.Parse(WidgetCards.Create(values,T));var serializer=new JavaScriptSerializer();
+            Assert(serializer.Serialize(cards["medium"]).Contains("上限到達")&&serializer.Serialize(cards["large"]).Contains("上限に達しています"));
+            Assert(!WidgetCards.Create(values,T.AddMinutes(16)).Contains("上限到達"));
+        });
         Check("Widget login buttons appear only for services needing authentication",()=> {
             var values=WidgetValues();values[1].NeedsLogin=true;values[2].NeedsLogin=true;
             string json=WidgetCards.Create(values,T);Assert(json.Contains("\"verb\":\"login-codex\"")&&json.Contains("\"verb\":\"login-grok\""));

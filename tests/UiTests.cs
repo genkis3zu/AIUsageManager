@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Linq;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -20,6 +21,7 @@ internal static class UiTests
         { Calls++;pending=new TaskCompletionSource<ServiceUsage[]>();return pending.Task; }
         public void Complete()
         { pending.SetResult(new[]{ServiceUsage.Empty("Claude",""),ServiceUsage.Empty("Codex",""),ServiceUsage.Empty("Grok","")}); }
+        public void Complete(ServiceUsage[] values) { pending.SetResult(values); }
     }
     sealed class FakeLogin : ILoginLauncher
     {
@@ -39,10 +41,14 @@ internal static class UiTests
     static void CheckSettings(ThemeSettings settings,string path)
     {
         Assert(settings.Load()==ThemeMode.System,"Missing preference follows Windows");
+        Assert(settings.LoadNotifications()==NotificationMode.All,"Usage warnings default to all notification types");
+        Assert(settings.SaveNotifications(NotificationMode.Off)&&settings.Load()==ThemeMode.System,"Muting notifications preserves theme");
         File.WriteAllText(path,"invalid setting");
         Assert(settings.Load()==ThemeMode.System,"Malformed preference follows Windows");
         foreach(var mode in new[]{ThemeMode.Light,ThemeMode.System,ThemeMode.Dark})
             Assert(settings.Save(mode)&&new ThemeSettings(path).Load()==mode,"Preference persists "+mode);
+        Assert(settings.SaveNotifications(NotificationMode.Thresholds)&&settings.Save(ThemeMode.Dark)&&new ThemeSettings(path).LoadNotifications()==NotificationMode.Thresholds,"Theme changes retain persisted notification mode");
+        settings.SaveNotifications(NotificationMode.All);
         Assert(!new ThemeSettings(Path.Combine(path,"settings.ini")).Save(ThemeMode.Dark),"Unwritable preference returns failure without throwing");
         Assert(ThemePalette.Select(ThemeMode.System,true).IsDark&&!ThemePalette.Select(ThemeMode.System,false).IsDark,"Automatic palette follows both Windows appearances");
         Assert(ThemePalette.Select(ThemeMode.Dark,false).IsDark&&!ThemePalette.Select(ThemeMode.Light,true).IsDark,"Explicit palette overrides Windows appearance");
@@ -70,9 +76,9 @@ internal static class UiTests
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             {
-                var source=new FakeSource();var login=new FakeLogin();context=new TrayContext(false,signal,source,settings,login,null);
+                var source=new FakeSource();var login=new FakeLogin();var notices=new List<string>();context=new TrayContext(false,signal,source,settings,login,null,text=>notices.Add(text));
                 var popup=Field<PopupForm>(context,"popup");var refresh=Field<Button>(popup,"refresh");
-                var row=popup.Controls.OfType<UsageRow>().Last();
+                var row=Field<UsageRow[]>(popup,"rows").Last();
                 var authMissing=ServiceUsage.Empty("Grok","ログインが必要です");authMissing.NeedsLogin=true;
                 row.Usage=authMissing;
                 Assert(row.Controls.OfType<Button>().Any(b=>b.Text.Contains("ログイン")),"Authentication failure exposes a login button");
@@ -121,6 +127,31 @@ internal static class UiTests
                 loginMenu.DropDownItems[0].PerformClick();Application.DoEvents();Assert(login.Calls==1,"Login launches cannot overlap");
                 login.Pending.SetResult(null);Assert(Pump(()=>source.Calls==4),"OAuth completion automatically refreshes usage");
                 source.Complete();Assert(Pump(()=>popup.Visible&&loginMenu.Enabled),"Completed login restores popup and controls");
+                timer.Stop();refresh.PerformClick();Assert(Pump(()=>source.Calls==5),"Warning update is requested");
+                var high=ServiceUsage.Empty("Codex","");high.Source="オンライン";high.RecordedAt=DateTimeOffset.Now;high.Windows[0].Percent=95;high.Windows[0].ResetsAt=DateTimeOffset.Now.AddDays(1);
+                var warningValues=new[]{ServiceUsage.Empty("Claude",""),high,ServiceUsage.Empty("Grok","")};
+                source.Complete(warningValues);Assert(Pump(()=>refresh.Enabled)&&notices.Count==1&&notices[0].Contains("Codex"),"Fresh high usage delivers a Windows notification through the app boundary");
+                var warningRow=Field<UsageRow[]>(popup,"rows")[1];
+                Assert(warningRow.AccessibleDescription.Contains("残り5%")&&warningRow.Height>=180,"Warning text is accessible and has dedicated visible space");
+                timer.Stop();refresh.PerformClick();Assert(Pump(()=>source.Calls==6),"Repeated warning refresh is requested");
+                high.RecordedAt=DateTimeOffset.Now;source.Complete(warningValues);Assert(Pump(()=>refresh.Enabled)&&notices.Count==1,"Manual refresh does not repeat the same warning notification");
+                var notifications=Field<ToolStripMenuItem>(context,"notificationMenu");notifications.DropDownItems[2].PerformClick();
+                Assert(settings.LoadNotifications()==NotificationMode.Off,"Notification menu persists muted mode");
+                timer.Stop();refresh.PerformClick();Assert(Pump(()=>source.Calls==7),"Muted update is requested");
+                high.RecordedAt=DateTimeOffset.Now;high.Windows[0].Percent=100;source.Complete(warningValues);
+                Assert(Pump(()=>refresh.Enabled)&&notices.Count==1&&warningRow.AccessibleDescription.Contains("上限"),"Mute suppresses delivery while preserving visible warnings");
+                timer.Stop();
+                var crowded=WidgetCards.Sample(DateTimeOffset.Now);foreach(var value in crowded){value.Source="オンライン";foreach(var window in value.Windows)window.Percent=100;}
+                typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(popup,2f);popup.SetUsage(crowded);
+                var content=Field<Panel>(popup,"content");
+                Assert(popup.Height<=Screen.FromControl(popup).WorkingArea.Height&&content.AutoScrollMinSize.Height>content.ClientSize.Height,"Many warnings at high DPI stay within the monitor with scrolling");
+                var keyHandler=typeof(PopupForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic);
+                Func<Keys,bool> key=keys=>(bool)keyHandler.Invoke(popup,new object[]{new Message(),keys});
+                Assert(key(Keys.End)&&Field<UsageRow[]>(popup,"rows").Last().Bottom<=content.ClientSize.Height,"End key makes the last warning reachable without a mouse");
+                int scrolled=content.AutoScrollPosition.Y;popup.TickDisplay();
+                Assert(content.AutoScrollPosition.Y==scrolled,"Display refresh preserves the warning scroll position");
+                Assert(key(Keys.Home)&&content.AutoScrollPosition.Y==0,"Home key returns to the first warning");
+                Assert(key(Keys.PageDown)&&content.AutoScrollPosition.Y<0&&key(Keys.PageUp)&&content.AutoScrollPosition.Y==0,"Page keys scroll the warning list from the focused header");
                 context.ExitThread();Assert(popup.IsDisposed,"Exit releases popup and tray resources");context=null;
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;

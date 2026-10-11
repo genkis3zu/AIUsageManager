@@ -57,6 +57,7 @@ internal static partial class Tests
         Check("Expired data requests fresh observation", () => Assert(UsageText.Reset(new UsageWindow("週",50,T), T.AddMinutes(1)).Contains("再取得待ち")));
         RunProviderTests();
         RunWidgetTests();
+        RunAlertTests();
         Console.WriteLine(string.Format("RESULT {0} passed, {1} failed", passed, failed));
         return failed==0 ? 0 : 1;
     }
