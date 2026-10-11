@@ -1,10 +1,12 @@
-param([string]$Version = '1.0.0', [string]$BuildDirectory = 'build\release')
+param([string]$Version = '1.1.0', [string]$BuildDirectory = 'build\release')
 $ErrorActionPreference = 'Stop'
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Version must be major.minor.patch' }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 & (Join-Path $projectRoot 'build.ps1') -NoPublish -OutputDirectory $BuildDirectory
 $binaryDirectory = Join-Path $projectRoot $BuildDirectory
 $binary = Join-Path $binaryDirectory 'AIUsageManager.exe'
+. (Join-Path $PSScriptRoot 'assert-release-clean.ps1')
+Assert-ReleaseBinaryClean $binary $projectRoot
 $fileVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($binary).FileVersion
 if ($fileVersion -ne "$Version.0") { throw 'Assembly file version and release version differ' }
 $stage = Join-Path $projectRoot ('build\packages\' + [Guid]::NewGuid().ToString('N'))

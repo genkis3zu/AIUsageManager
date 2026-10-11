@@ -12,4 +12,20 @@ jobs:
           persist-credentials: false
       - name: Build and run offline fixture tests
         shell: powershell
-        run: .\build.ps1 -NoPublish
+        run: .\build.ps1 -NoPublish -OutputDirectory build\widget-core
+      - name: Test and build Obsidian plugin
+        shell: powershell
+        run: |
+          node --test obsidian/tests/usage.test.cjs obsidian/tests/bridge.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Obsidian tests failed' }
+          node tools/build-obsidian.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Obsidian build failed' }
+      - name: Verify allowlisted Obsidian package
+        shell: powershell
+        run: .\tools\package-obsidian.ps1 -SkipBuild
+      - name: Build native widget provider and run transport tests
+        shell: powershell
+        run: .\tools\build-widgets.ps1 -SkipCoreBuild
+      - name: Verify allowlisted widget package
+        shell: powershell
+        run: .\tools\package-widgets.ps1 -SkipBuild

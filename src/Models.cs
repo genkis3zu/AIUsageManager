@@ -10,6 +10,7 @@ namespace AIUsageManager
         public string Label;
         public double? Percent;
         public DateTimeOffset? ResetsAt;
+        public UsageAlert Alert;
         public UsageWindow(string label, double? percent, DateTimeOffset? resetsAt)
         { Label = label; Percent = percent; ResetsAt = resetsAt; }
     }
@@ -20,6 +21,7 @@ namespace AIUsageManager
         public string Source = "";
         public string PlanNote = "";
         public string Status = "";
+        public bool NeedsLogin;
         public DateTimeOffset? RecordedAt;
         public readonly List<UsageWindow> Windows = new List<UsageWindow>();
         public bool HasData { get { return Windows.Any(w => w.Percent.HasValue); } }

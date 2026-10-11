@@ -20,3 +20,5 @@
 *.p12
 *.pem
 *.key
+**/.obsidian/
+/obsidian/data.json

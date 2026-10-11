@@ -14,12 +14,18 @@ internal static partial class Tests
         public int Calls;
         public bool OmitPlan;
         public bool HeadersCorrect = true;
+        public string CodexBody = "{\"plan_type\":\"prolite\",\"rate_limit\":{\"primary_window\":{\"used_percent\":7,\"limit_window_seconds\":604800,\"reset_at\":1791952268}}}";
         public HttpStatusCode Status = HttpStatusCode.OK;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Calls++;
             HeadersCorrect &= request.Method == HttpMethod.Get && request.RequestUri.Scheme == "https" && request.Headers.Authorization.Scheme == "Bearer";
             bool claude = request.RequestUri.Host == "api.anthropic.com";
+            if (request.RequestUri.Host == "chatgpt.com")
+            {
+                HeadersCorrect &= request.RequestUri.AbsoluteUri == "https://chatgpt.com/backend-api/wham/usage" && request.Headers.Authorization.Parameter == "fixture-codex" && request.Headers.GetValues("ChatGPT-Account-Id").Single() == "fixture-account";
+                return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status == HttpStatusCode.OK ? CodexBody : "sensitive-server-error") });
+            }
             HeadersCorrect &= claude ? request.Headers.Contains("anthropic-beta") : request.RequestUri.Host == "cli-chat-proxy.grok.com" && request.Headers.Contains("X-XAI-Token-Auth");
             return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status != HttpStatusCode.OK ? "sensitive-server-error" : claude ? "{\"five_hour\":{\"utilization\":1},\"seven_day\":{\"utilization\":98}}" : "{\"subscriptionTier\":"+(OmitPlan?"null":"\"SuperGrok Heavy\"")+",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"weekly\"}}}") });
         }
@@ -41,6 +47,84 @@ internal static partial class Tests
     }
     static void RunProviderTests()
     {
+        Check("Login launch uses fixed OAuth arguments without shell or output capture", () => {
+            var root=Fixture();var bin=Path.Combine(root,".grok","bin");Directory.CreateDirectory(bin);File.WriteAllText(Path.Combine(bin,"grok.exe"),"fixture");
+            var start=LoginLauncher.StartInfo("Grok",root,root,".");
+            Assert(start.FileName==Path.Combine(bin,"grok.exe") && start.Arguments=="login --oauth" && start.WorkingDirectory==root && !start.RedirectStandardOutput && !start.RedirectStandardError);
+            var codexBin=Path.Combine(root,"Programs","OpenAI","Codex","bin");Directory.CreateDirectory(codexBin);File.WriteAllText(Path.Combine(codexBin,"codex.exe"),"fixture");
+            Assert(LoginLauncher.StartInfo("Codex",root,root,null).Arguments=="login");
+        });
+        Check("Login never executes arbitrary service names or relative PATH entries", () => {
+            var root=Fixture();bool rejected=false;
+            try { LoginLauncher.StartInfo("Grok & injected",root,root,null); } catch(ArgumentException) { rejected=true; }
+            Assert(rejected && LoginLauncher.StartInfo("Grok",root,root,".;relative;C:relative")==null);
+        });
+        Check("Codex npm installation launches its bundled native CLI", () => {
+            foreach(string layout in new[]{"node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin","node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin"}) {
+                var root=Fixture();var prefix=Path.Combine(root,"npm");var native=Path.Combine(prefix,layout);Directory.CreateDirectory(native);
+                File.WriteAllText(Path.Combine(prefix,"codex.cmd"),"must not execute a shell");File.WriteAllText(Path.Combine(native,"codex.exe"),"fixture");
+                var start=LoginLauncher.StartInfo("Codex",root,root,prefix);Assert(start!=null && start.FileName==Path.Combine(native,"codex.exe") && start.Arguments=="login");
+            }
+        });
+        Check("Codex invalid credential headers never become network requests", () => {
+            foreach(string bad in new[]{"fixture-codex\\r\\ninjected",""}) {
+                var root=Fixture();CodexAuth(root);var path=Path.Combine(root,".codex","auth.json");File.WriteAllText(path,File.ReadAllText(path).Replace("fixture-codex",bad));
+                using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                    var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(!value.HasData && value.NeedsLogin && handler.Calls==0);
+                }
+            }
+        });
+        Check("Codex online usage replaces stale logs without modifying login", () => {
+            var root=Fixture();CodexAuth(root);File.WriteAllText(Path.Combine(root,".codex","sessions","old.jsonl"),Weekly(63));
+            var paths=Directory.GetFiles(root,"*",SearchOption.AllDirectories);var bytes=paths.Select(File.ReadAllText).ToArray();
+            using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];
+                Assert(value.Windows[0].Percent==7 && value.Plan=="Pro Lite" && value.Source=="オンライン" && value.RecordedAt>DateTimeOffset.UtcNow.AddMinutes(-1) && value.Windows[0].ResetsAt.HasValue && handler.Calls==1 && handler.HeadersCorrect);
+            }
+            Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
+        });
+        Check("Codex online secondary weekly zero ignores primary five-hour", () => {
+            var root=Fixture();CodexAuth(root);
+            using(var handler=new FakeHttp { CodexBody="{\"rate_limit\":{\"primary_window\":{\"used_percent\":90,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":0,\"limit_window_seconds\":604800}}}" })using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(value.Windows[0].Percent==0 && value.Source=="オンライン");
+            }
+        });
+        Check("Codex successful response without weekly percentage never resurrects old logs", () => {
+            foreach(string body in new[]{"{}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800}}}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":18000,\"used_percent\":20}},\"code_review_rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800,\"used_percent\":80}}}"}) {
+                var root=Fixture();CodexAuth(root);File.WriteAllText(Path.Combine(root,".codex","sessions","old.jsonl"),Weekly(63));
+                using(var http=new HttpClient(new FakeHttp { CodexBody=body })) {
+                    var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(!value.HasData && value.Source=="オンライン");
+                }
+            }
+        });
+        Check("Codex authentication error preserves old timestamp and actionable reason", () => {
+            var root=Fixture();CodexAuth(root);File.WriteAllText(Path.Combine(root,".codex","sessions","old.jsonl"),Weekly(63));
+            using(var http=new HttpClient(new FakeHttp { Status=HttpStatusCode.Unauthorized })) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];
+                Assert(value.Windows[0].Percent==63 && value.RecordedAt==T && value.Source=="CLI 記録" && value.NeedsLogin && value.Status.Contains("ログイン") && !value.Status.Contains("sensitive"));
+            }
+        });
+        Check("Codex API-key mode never sends leftover ChatGPT credentials", () => {
+            var root=Fixture();CodexAuth(root);
+            var path=Path.Combine(root,".codex","auth.json");File.WriteAllText(path,File.ReadAllText(path).Replace("\"chatgpt\"","\"apikey\""));
+            using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(!value.HasData && handler.Calls==0);
+            }
+        });
+        Check("Grok expired OAuth fallback explains login requirement", () => {
+            var root=Fixture();File.WriteAllText(Path.Combine(root,".grok","auth.json"),"{\"https://auth.x.ai::test\":{\"key\":\"expired\",\"expires_at\":\"2000-01-01T00:00:00Z\",\"refresh_token\":\"never-use\"}}");
+            File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
+            using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                Assert(value.Windows[0].Percent==35 && value.RecordedAt==T && value.NeedsLogin && value.Status.Contains("ログイン") && handler.Calls==0);
+            }
+        });
+        Check("Grok forbidden response is not reported as expired authentication", () => {
+            var root=Fixture();Auth(root);
+            using(var http=new HttpClient(new FakeHttp { Status=HttpStatusCode.Forbidden })) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];Assert(!value.HasData && !value.Status.Contains("ログイン"));
+            }
+        });
         Check("Read latest valid record through partial tail", () => {
             var root=Fixture();var file=Path.Combine(root,".codex","sessions","one.jsonl");
             File.WriteAllText(file,Weekly(2)+"\n"+Weekly(50)+"\n{\"partial\":");
@@ -111,4 +195,6 @@ internal static partial class Tests
             using(var http=new HttpClient(new FakeHttp())) {var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();Assert(values[0].Windows[0].Percent==9 && values[0].RecordedAt==T && values[0].Source.Contains("キャッシュ"));}
         });
     }
+    static void CodexAuth(string root)
+    { File.WriteAllText(Path.Combine(root,".codex","auth.json"),"{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"fixture-codex\",\"account_id\":\"fixture-account\",\"refresh_token\":\"never-use\"}}"); }
 }
