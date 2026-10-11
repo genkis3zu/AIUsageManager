@@ -24,6 +24,12 @@ namespace AIUsageManager
         [STAThread]
         static void Main(string[] args)
         {
+            if(args.Length==1&&args[0]=="--obsidian-data") {
+                string json=UsageSnapshot.Disconnected();
+                try {json=SnapshotClient.ReadAsync(SnapshotServer.CurrentName()).GetAwaiter().GetResult();}catch { }
+                using(var output=new StreamWriter(Console.OpenStandardOutput(),new UTF8Encoding(false)))output.Write(json);
+                return;
+            }
             // This path is an anonymous-pipe worker, independent of the visible tray instance.
             if(args.Length==1&&(args[0]=="--widget-data"||args[0]=="--widget-sample"))
             {
@@ -46,11 +52,13 @@ namespace AIUsageManager
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Show."+user))
             using(var codexLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Codex."+user))
             using(var grokLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Grok."+user))
+            using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Refresh."+user))
             {
                 bool loginCodex=args.Length==1&&args[0]=="--login-codex", loginGrok=args.Length==1&&args[0]=="--login-grok";
                 if(loginCodex)codexLogin.Set();else if(loginGrok)grokLogin.Set();
-                if(!created){if(!loginCodex&&!loginGrok)signal.Set();return;}
-                try {Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{codexLogin,grokLogin}));}
+                bool refresh=args.Length==1&&args[0]=="--refresh";
+                if(!created){if(refresh)refreshSignal.Set();else if(!loginCodex&&!loginGrok)signal.Set();return;}
+                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{codexLogin,grokLogin},null,snapshots,refreshSignal));}
                 finally {mutex.ReleaseMutex();}
             }
         }

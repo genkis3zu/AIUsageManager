@@ -113,7 +113,9 @@ namespace AIUsageManager
         public static UsageAlert Current(ServiceUsage service, UsageWindow window, DateTimeOffset now)
         { return Fresh(service,window,now)?Describe(window,Level(window.Percent.Value),false,null,now,0,0):null; }
         public static UsageAlert[] ForDisplay(ServiceUsage service,DateTimeOffset now)
-        { return service.Windows.Where(w=>Fresh(service,w,now)).Select(w=>w.Alert??Current(service,w,now)).Where(a=>a!=null).ToArray(); }
+        { return service.Windows.Select(w=>ForWindow(service,w,now)).Where(a=>a!=null).ToArray(); }
+        public static UsageAlert ForWindow(ServiceUsage service,UsageWindow window,DateTimeOffset now)
+        { return Fresh(service,window,now)?window.Alert??Current(service,window,now):null; }
         public static string NotificationText(UsageNotice[] notices)
         {
             string text=string.Join("\n",notices.OrderByDescending(n=>n.Threshold).Select(n=>n.Text));

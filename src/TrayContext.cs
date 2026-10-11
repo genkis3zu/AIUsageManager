@@ -30,6 +30,9 @@ namespace AIUsageManager
         readonly ToolStripMenuItem notificationMenu = new ToolStripMenuItem("通知");
         readonly UsageAlerts alerts = new UsageAlerts();
         readonly Action<string> notify;
+        readonly SnapshotServer snapshots;
+        readonly RegisteredWaitHandle refreshWait;
+        ServiceUsage[] latest=WidgetCards.Unavailable();
         readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[2];
         ThemeMode themeMode;
         NotificationMode notificationMode;
@@ -42,7 +45,10 @@ namespace AIUsageManager
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals)
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
+            : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal)
         {
+            snapshots=snapshotServer;
             loginLauncher=launcher;
             settings=themeSettings;themeMode=settings.Load();notificationMode=settings.LoadNotifications();
             service = source ?? new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), http);
@@ -91,6 +97,9 @@ namespace AIUsageManager
             displayTimer.Tick+=(s,e)=>popup.TickDisplay();displayTimer.Start();
             showWait=ThreadPool.RegisterWaitForSingleObject(showEvent,(state,timedOut)=> {
                 try { if(!exiting)popup.BeginInvoke(new Action(ShowPopup)); }catch(InvalidOperationException){}
+            },null,Timeout.Infinite,false);
+            if(refreshSignal!=null)refreshWait=ThreadPool.RegisterWaitForSingleObject(refreshSignal,(state,timedOut)=> {
+                try {if(!exiting)popup.BeginInvoke(new Action(async()=>await RefreshUsage()));}catch(InvalidOperationException){}
             },null,Timeout.Infinite,false);
             popup.BeginInvoke(new Action(async()=> { if(show)ShowPopup();await RefreshUsage(); }));
         }
@@ -155,11 +164,13 @@ namespace AIUsageManager
         {
             if(refreshing||exiting)return;
             refreshing=true;refreshTimer.Stop();popup.SetRefresh(true,nextRefresh);menu.Items[1].Enabled=false;
+            PublishSnapshot();
             try
             {
                 var result=await service.FetchAllAsync(cancellation.Token);
                 if(exiting)return;
                 var notices=alerts.Observe(result,DateTimeOffset.Now,notificationMode);
+                latest=result;
                 popup.SetUsage(result);
                 string summary=string.Join(" | ",result.Select(r=>r.Name+" "+string.Join("/",r.Windows.Select(w=>UsageText.Percent(w.Percent)))));
                 tray.Text=summary.Length>63?summary.Substring(0,63):summary;
@@ -169,19 +180,22 @@ namespace AIUsageManager
             catch(Exception)
             {
                 // Never show exception text: it can contain request/credential or local-file data.
-                if(!exiting)popup.SetUsage(new[]{ServiceUsage.Empty("Claude","取得できません・次回更新で再試行"),ServiceUsage.Empty("Codex","取得できません・次回更新で再試行"),ServiceUsage.Empty("Grok","取得できません・次回更新で再試行")});
+                if(!exiting){latest=WidgetCards.Unavailable();popup.SetUsage(latest);}
             }
             finally
             {
                 refreshing=false;
+                if(!exiting)PublishSnapshot();
                 if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;refreshTimer.Start();}
             }
         }
+        void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing)); }
         protected override void ExitThreadCore()
         {
             if(exiting)return;exiting=true;
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
             refreshTimer.Stop();displayTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
+            if(refreshWait!=null)refreshWait.Unregister(null);
             foreach(var wait in loginWaits)if(wait!=null)wait.Unregister(null);
             tray.Visible=false;var icon=tray.Icon;tray.Dispose();icon.Dispose();menu.Dispose();popup.Dispose();
             refreshTimer.Dispose();displayTimer.Dispose();http.Dispose();cancellation.Dispose();base.ExitThreadCore();

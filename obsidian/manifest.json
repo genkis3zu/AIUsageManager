@@ -1,0 +1,10 @@
+{
+  "id": "ai-usage-manager",
+  "name": "AI Usage Manager",
+  "version": "1.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Keep Claude, Codex and Grok usage visible above your notes, in one or three rows.",
+  "author": "AI Usage Manager contributors",
+  "authorUrl": "https://github.com/genkis3zu/AIUsageManager",
+  "isDesktopOnly": true
+}

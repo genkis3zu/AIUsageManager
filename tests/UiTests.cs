@@ -75,8 +75,10 @@ internal static class UiTests
             string fixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
+            using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
+            using(var snapshots=new SnapshotServer("AIUsageManager.UiTests."+Guid.NewGuid().ToString("N")))
             {
-                var source=new FakeSource();var login=new FakeLogin();var notices=new List<string>();context=new TrayContext(false,signal,source,settings,login,null,text=>notices.Add(text));
+                var source=new FakeSource();var login=new FakeLogin();var notices=new List<string>();context=new TrayContext(false,signal,source,settings,login,null,text=>notices.Add(text),snapshots,refreshSignal);
                 var popup=Field<PopupForm>(context,"popup");var refresh=Field<Button>(popup,"refresh");
                 var row=Field<UsageRow[]>(popup,"rows").Last();
                 var authMissing=ServiceUsage.Empty("Grok","ログインが必要です");authMissing.NeedsLogin=true;
@@ -133,6 +135,8 @@ internal static class UiTests
                 source.Complete(warningValues);Assert(Pump(()=>refresh.Enabled)&&notices.Count==1&&notices[0].Contains("Codex"),"Fresh high usage delivers a Windows notification through the app boundary");
                 var warningRow=Field<UsageRow[]>(popup,"rows")[1];
                 Assert(warningRow.AccessibleDescription.Contains("残り5%")&&warningRow.Height>=180,"Warning text is accessible and has dedicated visible space");
+                string snapshot=Field<string>(snapshots,"latest");
+                Assert(snapshot.Contains("\"percent\":95")&&snapshot.Contains("残り5%")&&source.Calls==5,"Tray publishes the same usage and alert without a second provider fetch");
                 timer.Stop();refresh.PerformClick();Assert(Pump(()=>source.Calls==6),"Repeated warning refresh is requested");
                 high.RecordedAt=DateTimeOffset.Now;source.Complete(warningValues);Assert(Pump(()=>refresh.Enabled)&&notices.Count==1,"Manual refresh does not repeat the same warning notification");
                 var notifications=Field<ToolStripMenuItem>(context,"notificationMenu");notifications.DropDownItems[2].PerformClick();
@@ -152,6 +156,8 @@ internal static class UiTests
                 Assert(content.AutoScrollPosition.Y==scrolled,"Display refresh preserves the warning scroll position");
                 Assert(key(Keys.Home)&&content.AutoScrollPosition.Y==0,"Home key returns to the first warning");
                 Assert(key(Keys.PageDown)&&content.AutoScrollPosition.Y<0&&key(Keys.PageUp)&&content.AutoScrollPosition.Y==0,"Page keys scroll the warning list from the focused header");
+                refreshSignal.Set();Assert(Pump(()=>source.Calls==8),"Obsidian refresh signal requests a tray refresh");
+                source.Complete();Assert(Pump(()=>refresh.Enabled),"Signaled refresh completes normally");
                 context.ExitThread();Assert(popup.IsDisposed,"Exit releases popup and tray resources");context=null;
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;
