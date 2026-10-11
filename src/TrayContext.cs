@@ -25,13 +25,19 @@ namespace AIUsageManager
         readonly ToolStripMenuItem themeMenu = new ToolStripMenuItem("テーマ");
         readonly ToolStripMenuItem widgetMenu = new ToolStripMenuItem("Windows ウィジェット");
         readonly ThemeSettings settings;
+        readonly ILoginLauncher loginLauncher;
+        readonly ToolStripMenuItem loginMenu = new ToolStripMenuItem("ログイン");
+        readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[2];
         ThemeMode themeMode;
-        bool refreshing, exiting;
+        bool refreshing, exiting, loggingIn;
         DateTimeOffset? nextRefresh;
         public TrayContext(bool show, EventWaitHandle signal) : this(show, signal, null) { }
         public TrayContext(bool show, EventWaitHandle signal, IUsageSource source) : this(show, signal, source, ThemeSettings.Default()) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings)
+            : this(show,signal,source,themeSettings,new LoginLauncher(),null) { }
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals)
         {
+            loginLauncher=launcher;
             settings=themeSettings;themeMode=settings.Load();
             service = source ?? new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), http);
             showEvent=signal;
@@ -40,6 +46,8 @@ namespace AIUsageManager
             tray=new NotifyIcon { Icon=Artwork.TrayIcon(),Text="AI Usage Manager",Visible=true,ContextMenuStrip=menu };
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
             menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
+            foreach(string name in new[]{"Codex","Grok"}) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
+            menu.Items.Add(loginMenu);
             AddThemeChoice("Windowsに合わせる",ThemeMode.System);
             AddThemeChoice("ライト",ThemeMode.Light);
             AddThemeChoice("ダーク",ThemeMode.Dark);
@@ -60,6 +68,13 @@ namespace AIUsageManager
                 else if((DateTimeOffset.UtcNow-popup.LastDeactivated).TotalMilliseconds>350)ShowPopup();
             };
             popup.RefreshRequested+=async(s,e)=>await RefreshUsage();
+            popup.LoginRequested+=async name=>await Login(name);
+            if(loginSignals!=null)for(int i=0;i<loginWaits.Length;i++) {
+                string name=i==0?"Codex":"Grok";
+                loginWaits[i]=ThreadPool.RegisterWaitForSingleObject(loginSignals[i],(state,timedOut)=> {
+                    try { if(!exiting)popup.BeginInvoke(new Action(async()=>await Login(name))); }catch(InvalidOperationException){}
+                },null,Timeout.Infinite,false);
+            }
             refreshTimer.Tick+=async(s,e)=>await RefreshUsage();
             displayTimer.Tick+=(s,e)=>popup.TickDisplay();displayTimer.Start();
             showWait=ThreadPool.RegisterWaitForSingleObject(showEvent,(state,timedOut)=> {
@@ -90,6 +105,7 @@ namespace AIUsageManager
             menu.Renderer=renderer;menu.BackColor=palette.Surface;menu.ForeColor=palette.Ink;
             themeMenu.DropDown.Renderer=renderer;themeMenu.DropDown.BackColor=palette.Surface;themeMenu.DropDown.ForeColor=palette.Ink;
             widgetMenu.DropDown.Renderer=renderer;widgetMenu.DropDown.BackColor=palette.Surface;widgetMenu.DropDown.ForeColor=palette.Ink;
+            loginMenu.DropDown.Renderer=renderer;loginMenu.DropDown.BackColor=palette.Surface;loginMenu.DropDown.ForeColor=palette.Ink;
             foreach(ToolStripMenuItem item in themeMenu.DropDownItems)item.Checked=(ThemeMode)item.Tag==themeMode;
             menu.Invalidate(true);themeMenu.DropDown.Invalidate(true);
         }
@@ -99,6 +115,19 @@ namespace AIUsageManager
             try { if(!exiting)popup.BeginInvoke(new Action(ApplyTheme)); }catch(InvalidOperationException) { }
         }
         void ShowPopup() { if(!exiting){ApplyTheme();popup.OpenAt(Cursor.Position);} }
+        async Task Login(string name)
+        {
+            if(loggingIn||exiting)return;
+            loggingIn=true;loginMenu.Enabled=false;popup.SetLoginBusy(true);popup.Hide();
+            try {
+                string error=await loginLauncher.LoginAsync(name);
+                if(exiting)return;
+                if(error!=null)MessageBox.Show(error,name+" ログイン",MessageBoxButtons.OK,MessageBoxIcon.Information);
+                // Let an earlier request finish so it cannot overwrite the post-login result.
+                while(refreshing&&!exiting)await Task.Delay(100);
+                if(!exiting){await RefreshUsage();ShowPopup();}
+            } finally {loggingIn=false;if(!exiting){loginMenu.Enabled=true;popup.SetLoginBusy(false);}}
+        }
         async Task RefreshUsage()
         {
             if(refreshing||exiting)return;
@@ -127,6 +156,7 @@ namespace AIUsageManager
             if(exiting)return;exiting=true;
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
             refreshTimer.Stop();displayTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
+            foreach(var wait in loginWaits)if(wait!=null)wait.Unregister(null);
             tray.Visible=false;var icon=tray.Icon;tray.Dispose();icon.Dispose();menu.Dispose();popup.Dispose();
             refreshTimer.Dispose();displayTimer.Dispose();http.Dispose();cancellation.Dispose();base.ExitThreadCore();
         }

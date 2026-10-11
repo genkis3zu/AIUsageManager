@@ -16,6 +16,11 @@ internal static partial class Tests
     }
     static void RunWidgetTests()
     {
+        Check("Widget login buttons appear only for services needing authentication",()=> {
+            var values=WidgetValues();values[1].NeedsLogin=true;values[2].NeedsLogin=true;
+            string json=WidgetCards.Create(values,T);Assert(json.Contains("\"verb\":\"login-codex\"")&&json.Contains("\"verb\":\"login-grok\""));
+            Assert(!WidgetCards.Create(WidgetValues(),T).Contains("login-"));
+        });
         Check("Widget has two independently valid Adaptive Cards",()=> {
             var root=Json.Parse(WidgetCards.Create(WidgetValues(),T));
             Assert(Json.Str(Json.Obj(root,"medium"),"type")=="AdaptiveCard" && Json.Str(Json.Obj(root,"large"),"type")=="AdaptiveCard");

@@ -112,6 +112,7 @@ namespace AIUsageManager
     {
         public string Body;
         public string Error;
+        public bool NeedsLogin;
     }
     public interface IUsageSource
     {
@@ -132,7 +133,7 @@ namespace AIUsageManager
             // Isolate disk enumeration and network work from the UI thread.
             return await Task.WhenAll(
                 Task.Run(() => SafeProvider("Claude", () => Claude(cancellation))),
-                Task.Run(() => SafeProvider("Codex", () => Task.FromResult(FileSources.Codex(profile)))),
+                Task.Run(() => SafeProvider("Codex", () => Codex(cancellation))),
                 Task.Run(() => SafeProvider("Grok", () => Grok(cancellation)))).ConfigureAwait(false);
         }
         static async Task<ServiceUsage> SafeProvider(string name, Func<Task<ServiceUsage>> fetch)
@@ -154,7 +155,8 @@ namespace AIUsageManager
                     using (var response = await http.SendAsync(request, cancellation).ConfigureAwait(false))
                     {
                         int status = (int)response.StatusCode;
-                        if (status == 401 || status == 403) return new FetchResult { Error = "CLI で再ログインが必要です" };
+                        if (status == 401) return new FetchResult { Error = "再ログインが必要です", NeedsLogin = true };
+                        if (status == 403) return new FetchResult { Error = "取得先がアクセスを拒否しました" };
                         if (status == 429) return new FetchResult { Error = "取得制限中・5分後に再試行" };
                         if (!response.IsSuccessStatusCode) return new FetchResult { Error = "使用量の取得先に接続できません" };
                         return new FetchResult { Body = await response.Content.ReadAsStringAsync().ConfigureAwait(false) };
@@ -163,6 +165,36 @@ namespace AIUsageManager
                 catch (HttpRequestException) { return new FetchResult { Error = "接続できません・次回更新で再試行" }; }
                 catch (OperationCanceledException) { return new FetchResult { Error = "通信がタイムアウトしました" }; }
             }
+        }
+        static bool ValidHeader(string value)
+        { return !string.IsNullOrWhiteSpace(value) && !value.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)); }
+        async Task<ServiceUsage> Codex(CancellationToken cancellation)
+        {
+            Dictionary<string, object> auth = null;
+            try { auth = Json.Parse(ReadOnlyFiles.Small(Path.Combine(profile, ".codex", "auth.json"))); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            var tokens = Json.Obj(auth, "tokens");
+            string mode = Json.Str(auth, "auth_mode");
+            string token = Json.Str(tokens, "access_token");
+            string account = Json.Str(tokens, "account_id");
+            string error = "ChatGPT ログインが必要です";
+            bool login = true;
+            // Never reuse leftover subscription credentials when API-key mode was selected.
+            if ((mode == null || mode == "chatgpt") && string.IsNullOrEmpty(Json.Str(auth, "OPENAI_API_KEY")) && ValidHeader(token) && (account == null || ValidHeader(account)))
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, "https://chatgpt.com/backend-api/wham/usage");
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                if (account != null) request.Headers.Add("ChatGPT-Account-Id", account);
+                var response = await Get(request, cancellation).ConfigureAwait(false);
+                // A successful current response must not be replaced with stale log data.
+                if (response.Body != null) return UsageParser.CodexOnline(response.Body, DateTimeOffset.UtcNow);
+                error = response.Error; login = response.NeedsLogin;
+            }
+            var fallback = FileSources.Codex(profile);
+            fallback.NeedsLogin = login;
+            fallback.Status = error + (fallback.HasData ? "・CLI 記録を表示" : "");
+            return fallback;
         }
         async Task<ServiceUsage> Claude(CancellationToken cancellation)
         {
@@ -224,6 +256,7 @@ namespace AIUsageManager
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
             string error = "Grok CLI のログインが必要です";
+            bool login = true;
             var end = Json.Date(Json.Get(selected, "expires_at"));
             if (selected != null && (!end.HasValue || end > DateTimeOffset.UtcNow))
             {
@@ -250,11 +283,12 @@ namespace AIUsageManager
                     // An authoritative response without weekly usage must not revive an old period.
                     return result;
                 }
-                else error = response.Error;
+                else { error = response.Error; login = response.NeedsLogin; }
             }
             else if (selected != null) error = "Grok CLI で再ログインが必要です";
             var fallback = FileSources.Grok(profile);
-            fallback.Status = fallback.HasData ? "オンライン未取得・CLI 記録を表示" : error;
+            fallback.NeedsLogin = login;
+            fallback.Status = error + (fallback.HasData ? "・CLI 記録を表示" : "");
             return fallback;
         }
     }

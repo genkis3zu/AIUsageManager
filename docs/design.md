@@ -12,6 +12,7 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Artwork.cs` | 描画補助、サービスの印、埋込アプリアイコン |
 | `Models.cs` / `Parsers.cs` | 表示用モデル、欠損値・期間・時刻の解釈 |
 | `Providers.cs` | 読み取り専用ファイル処理、固定HTTPS GET、代替情報 |
+| `Login.cs` | ユーザー操作による公式CLIのOAuth起動と終了待機 |
 | `Theme.cs` | 配色、Windows設定参照、テーマ設定保存、メニュー描画 |
 
 取得はUIスレッド外で実行し、結果をまとめてUIへ反映します。各サービスのエラーを分離し、同時更新を防ぎます。表示中は15秒ごとにリセットまでの時間を描画し直します。

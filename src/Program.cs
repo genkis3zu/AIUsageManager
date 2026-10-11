@@ -44,9 +44,13 @@ namespace AIUsageManager
             bool created;
             using(var mutex=new Mutex(true,"Local\\AIUsageManager.Instance."+user,out created))
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Show."+user))
+            using(var codexLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Codex."+user))
+            using(var grokLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Grok."+user))
             {
-                if(!created){signal.Set();return;}
-                try {Application.Run(new TrayContext(args.Contains("--show"),signal));}
+                bool loginCodex=args.Length==1&&args[0]=="--login-codex", loginGrok=args.Length==1&&args[0]=="--login-grok";
+                if(loginCodex)codexLogin.Set();else if(loginGrok)grokLogin.Set();
+                if(!created){if(!loginCodex&&!loginGrok)signal.Set();return;}
+                try {Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{codexLogin,grokLogin}));}
                 finally {mutex.ReleaseMutex();}
             }
         }

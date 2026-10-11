@@ -21,6 +21,13 @@ internal static class UiTests
         public void Complete()
         { pending.SetResult(new[]{ServiceUsage.Empty("Claude",""),ServiceUsage.Empty("Codex",""),ServiceUsage.Empty("Grok","")}); }
     }
+    sealed class FakeLogin : ILoginLauncher
+    {
+        public int Calls;
+        public string Service;
+        public readonly TaskCompletionSource<string> Pending=new TaskCompletionSource<string>();
+        public Task<string> LoginAsync(string service) { Calls++;Service=service;return Pending.Task; }
+    }
     static T Field<T>(object o,string name) { return (T)o.GetType().GetField(name,BindingFlags.Instance|BindingFlags.NonPublic).GetValue(o); }
     static int passed;
     static void Assert(bool value,string name) { if(!value)throw new Exception(name);passed++;Console.WriteLine("PASS "+name); }
@@ -63,8 +70,12 @@ internal static class UiTests
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             {
-                var source=new FakeSource();context=new TrayContext(false,signal,source,settings);
+                var source=new FakeSource();var login=new FakeLogin();context=new TrayContext(false,signal,source,settings,login,null);
                 var popup=Field<PopupForm>(context,"popup");var refresh=Field<Button>(popup,"refresh");
+                var row=popup.Controls.OfType<UsageRow>().Last();
+                var authMissing=ServiceUsage.Empty("Grok","ログインが必要です");authMissing.NeedsLogin=true;
+                row.Usage=authMissing;
+                Assert(row.Controls.OfType<Button>().Any(b=>b.Text.Contains("ログイン")),"Authentication failure exposes a login button");
                 var timer=Field<System.Windows.Forms.Timer>(context,"refreshTimer");
                 var themes=Field<ToolStripMenuItem>(context,"themeMenu");var menu=Field<ContextMenuStrip>(context,"menu");
                 var widgets=Field<ToolStripMenuItem>(context,"widgetMenu");
@@ -102,6 +113,14 @@ internal static class UiTests
                 Assert(Pump(()=>source.Calls==3),"Real timer tick triggers background refresh");
                 Application.DoEvents();Assert(source.Calls==3&&!timer.Enabled,"Timer pauses while request pending");
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Timer refresh completes");
+                timer.Stop();popup.OpenAt(new Point(300,500));
+                row.Usage=authMissing;
+                row.Controls.OfType<Button>().Single().PerformClick();
+                Assert(Pump(()=>login.Calls==1)&&login.Service=="Grok"&&!popup.Visible,"Login button starts official authentication for its service");
+                var loginMenu=Field<ToolStripMenuItem>(context,"loginMenu");
+                loginMenu.DropDownItems[0].PerformClick();Application.DoEvents();Assert(login.Calls==1,"Login launches cannot overlap");
+                login.Pending.SetResult(null);Assert(Pump(()=>source.Calls==4),"OAuth completion automatically refreshes usage");
+                source.Complete();Assert(Pump(()=>popup.Visible&&loginMenu.Enabled),"Completed login restores popup and controls");
                 context.ExitThread();Assert(popup.IsDisposed,"Exit releases popup and tray resources");context=null;
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;

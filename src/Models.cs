@@ -20,6 +20,7 @@ namespace AIUsageManager
         public string Source = "";
         public string PlanNote = "";
         public string Status = "";
+        public bool NeedsLogin;
         public DateTimeOffset? RecordedAt;
         public readonly List<UsageWindow> Windows = new List<UsageWindow>();
         public bool HasData { get { return Windows.Any(w => w.Percent.HasValue); } }

@@ -11,19 +11,33 @@ namespace AIUsageManager
     {
         ThemePalette palette=ThemePalette.Light;
         ServiceUsage usage;
+        readonly Button login = new Button { Text="ログイン", FlatStyle=FlatStyle.Flat, Cursor=Cursors.Hand, Visible=false };
+        public event Action<string> LoginRequested;
         public ServiceUsage Usage
         {
             get { return usage; }
             set
             {
                 usage=value;
+                login.Visible=value.NeedsLogin&&(value.Name=="Codex"||value.Name=="Grok");
+                login.AccessibleName=value.Name+" にログイン";
                 AccessibleName=value.Name+" "+value.Plan+" "+string.Join("、",value.Windows.Select(w=>w.Label+" "+UsageText.Percent(w.Percent)+" "+UsageText.Reset(w,DateTimeOffset.Now)));
                 AccessibleDescription=Stamp(value)+" "+value.Status+" "+value.PlanNote;
                 Invalidate();
             }
         }
-        public UsageRow() { DoubleBuffered=true;BackColor=Color.White;AccessibleRole=AccessibleRole.Grouping;TabStop=false; }
-        public void ApplyTheme(ThemePalette value) { palette=value;BackColor=value.Surface;ForeColor=value.Ink;Invalidate(); }
+        public UsageRow() {
+            DoubleBuffered=true;BackColor=Color.White;AccessibleRole=AccessibleRole.Grouping;TabStop=false;
+            login.FlatAppearance.BorderSize=0;Controls.Add(login);
+            login.Click+=(s,e)=>{if(usage!=null&&LoginRequested!=null)LoginRequested(usage.Name);};
+        }
+        public void SetLoginBusy(bool busy) { login.Enabled=!busy;login.Text=busy?"ログイン中":"ログイン"; }
+        protected override void OnResize(EventArgs e) {
+            base.OnResize(e);float scale=Width/388f;
+            login.SetBounds((int)(294*scale),(int)(101*scale),(int)(91*scale),(int)(27*scale));
+            var old=login.Font;login.Font=new Font("Yu Gothic UI",9*scale);if(old!=Control.DefaultFont)old.Dispose();
+        }
+        public void ApplyTheme(ThemePalette value) { palette=value;BackColor=value.Surface;ForeColor=value.Ink;login.BackColor=value.Surface;login.ForeColor=value.Blue;login.FlatAppearance.MouseOverBackColor=value.Hover;Invalidate(); }
         static string Stamp(ServiceUsage value)
         { return value.RecordedAt.HasValue ? "取得 "+value.RecordedAt.Value.ToLocalTime().ToString("MM/dd HH:mm:ss") : (value.HasData ? "取得時刻不明" : "取得時刻 —"); }
         protected override void OnPaint(PaintEventArgs e)
@@ -55,7 +69,7 @@ namespace AIUsageManager
             bool old=usage.RecordedAt.HasValue && DateTimeOffset.Now-usage.RecordedAt.Value>TimeSpan.FromMinutes(15);
             if(old)stamp+="  ·  保存された値";
             Artwork.Text(g,stamp,10,false,palette.Muted,new RectangleF(39,87,349,18),false);
-            if(!string.IsNullOrEmpty(usage.Status))Artwork.Text(g,usage.Status,10,false,palette.Warning,new RectangleF(39,105,349,18),false);
+            if(!string.IsNullOrEmpty(usage.Status))Artwork.Text(g,usage.Status,10,false,palette.Warning,new RectangleF(39,105,usage.NeedsLogin?253:349,18),false);
             using(var pen=new Pen(palette.Separator))g.DrawLine(pen,39,Height/scale-1,388,Height/scale-1);
         }
     }
@@ -71,12 +85,13 @@ namespace AIUsageManager
         public DateTimeOffset LastDeactivated { get; private set; }
         DateTimeOffset? nextRefresh;
         public event EventHandler RefreshRequested;
+        public event Action<string> LoginRequested;
         public PopupForm()
         {
             Text="AI Usage Manager";Icon=windowIcon;FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;
             AutoScaleMode=AutoScaleMode.None;BackColor=Color.White;DoubleBuffered=true;KeyPreview=true;
             AccessibleName="AI 使用量";
-            foreach(var row in rows)Controls.Add(row);
+            foreach(var row in rows){Controls.Add(row);row.LoginRequested+=name=>{if(LoginRequested!=null)LoginRequested(name);};}
             ConfigureButton(refresh,"更新", "使用量を更新 (F5)");ConfigureButton(close,"×","閉じる (Esc)");
             tips.OwnerDraw=true;
             tips.Draw+=(s,e)=> {
@@ -118,6 +133,7 @@ namespace AIUsageManager
         }
         public void SetRefresh(bool isBusy,DateTimeOffset? next)
         {busy=isBusy;nextRefresh=next;refresh.Enabled=!busy;refresh.Text=busy?"更新中":"更新";Invalidate();}
+        public void SetLoginBusy(bool value) { foreach(var row in rows)row.SetLoginBusy(value); }
         public void TickDisplay() { if(Visible){foreach(var row in rows)row.Invalidate();Invalidate();} }
         void LayoutRows()
         {

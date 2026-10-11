@@ -47,6 +47,7 @@ internal static class Diagnostics
             var missing=ServiceUsage.Empty("Claude","CLI で再ログインが必要です");
             var zero=ServiceUsage.Empty("Codex","");zero.Plan="Pro Lite";zero.Windows[0].Percent=0;zero.RecordedAt=DateTimeOffset.Now;
             var expired=ServiceUsage.Empty("Grok","オンライン未取得・CLI 記録を表示");expired.Plan="SuperGrok Heavy";expired.Windows[0].Percent=100;expired.Windows[0].ResetsAt=DateTimeOffset.Now.AddDays(-1);expired.RecordedAt=DateTimeOffset.Now.AddDays(-7);expired.Source="CLI 記録";
+            expired.NeedsLogin=true;expired.Status="再ログインが必要です・CLI 記録を表示";
             typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,1f);form.SetUsage(new[]{missing,zero,expired});
             using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,"states-"+theme+"-100.png"),ImageFormat.Png);}
         }

@@ -35,9 +35,9 @@ static std::wstring AppPath()
     wchar_t path[32768]{};DWORD length=GetModuleFileNameW(nullptr,path,32768);Require(length>0&&length<32768);
     std::wstring directory(path,length);return directory.substr(0,directory.find_last_of(L"\\")+1)+L"AIUsageManager.exe";
 }
-static void OpenTray()
+static void OpenTray(std::wstring const& argument=L"--show")
 {
-    auto path=AppPath();std::wstring command=L"\""+path+L"\" --show";
+    auto path=AppPath();std::wstring command=L"\""+path+L"\" "+argument;
     STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION process{};
     if(CreateProcessW(path.c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,nullptr,&startup,&process)){CloseHandle(process.hThread);CloseHandle(process.hProcess);}
 }
@@ -76,7 +76,12 @@ struct Provider:winrt::implements<Provider,P::IWidgetProvider>
     void CreateWidget(P::WidgetContext const& context){Queue(context);}
     void DeleteWidget(winrt::hstring const& id,winrt::hstring const&){std::lock_guard lock(gate);state.remove(std::wstring(id));}
     void OnActionInvoked(P::WidgetActionInvokedArgs const& args)
-    {if(args.Verb()==L"refresh")Queue(args.WidgetContext());else if(args.Verb()==L"open")OpenTray();}
+    {
+        if(args.Verb()==L"refresh")Queue(args.WidgetContext());
+        else if(args.Verb()==L"open")OpenTray();
+        else if(args.Verb()==L"login-codex")OpenTray(L"--login-codex");
+        else if(args.Verb()==L"login-grok")OpenTray(L"--login-grok");
+    }
     void OnWidgetContextChanged(P::WidgetContextChangedArgs const& args){Queue(args.WidgetContext());}
     void Activate(P::WidgetContext const& context){Queue(context,true);}
     void Deactivate(winrt::hstring const& id){std::lock_guard lock(gate);state.deactivate(std::wstring(id));}

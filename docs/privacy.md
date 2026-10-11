@@ -7,12 +7,13 @@
 | パス（`%USERPROFILE%` からの相対） | 用途 |
 |---|---|
 | `.codex/sessions/**/*.jsonl` | Codexの週使用量・観測時刻 |
+| `.codex/auth.json` | Codexの既存ChatGPTログインによる認証 |
 | `.grok/logs/unified.jsonl` | Grokの週使用量とプランの代替情報 |
 | `.grok/auth.json` | Grokの既存ログインによる認証 |
 | `.claude/.credentials.json` | Claude Codeの既存ログインによる認証 |
 | `.claude/usage-cache.json` | 存在する場合だけ、Claude使用量の代替情報 |
 
-これらのファイルへの書き込み、トークン更新、CLI設定変更はしません。会話を含むログの末尾を読み取りますが、パーサーが取り出すのは使用量と関連する表示項目です。
+AI Usage Managerの取得処理は、これらのファイルへの書き込み、トークン更新、CLI設定変更をしません。会話を含むログの末尾を読み取りますが、パーサーが取り出すのは使用量と関連する表示項目です。
 
 ## 通信
 
@@ -20,9 +21,15 @@
 |---|---|---|
 | Claude | `api.anthropic.com/api/oauth/usage` | 既存ログインのBearerトークン |
 | Grok | `cli-chat-proxy.grok.com/v1/billing?format=credits` | 既存ログインのBearerトークンと、存在すればユーザーIDヘッダー |
-| Codex | 通信なし | ローカル記録のみ |
+| Codex | `chatgpt.com/backend-api/wham/usage` | 既存ChatGPTログインのBearerトークンと、存在すればアカウントIDヘッダー |
 
 リダイレクトとCookieは無効、証明書はWindows標準検証、タイムアウトは15秒、応答上限は1 MiBです。テレメトリー、分析SDK、独自バックエンド、自動更新確認はありません。サービス側は通常の認証リクエストに伴う情報を受け取ります。
+
+## ユーザーが開始するログイン
+
+Codex・Grokの「ログイン」ボタンは、インストール済みの公式CLIを起動します。引数は `codex.exe login` または `grok.exe login --oauth` に固定し、認証情報をコマンド引数に含めません。CLIの出力をキャプチャ・保存しません。既知のユーザー別インストール先と絶対パスのPATHから実行ファイルを探し、シェル文字列として実行しません。
+
+認証中は公式CLIのウィンドウとブラウザが開きます。認証ファイルの保存・更新やOAuth通信は公式CLIが行います。AI Usage Manager自身はトークンを保存せず、CLI終了後に上記ファイルを読み直します。定期更新がログインを自動起動することはありません。
 
 ## 保存と表示
 

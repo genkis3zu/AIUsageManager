@@ -102,6 +102,24 @@ namespace AIUsageManager
             }
             return null;
         }
+        public static ServiceUsage CodexOnline(string json, DateTimeOffset time)
+        {
+            var result = ServiceUsage.Empty("Codex", "週の使用量を取得できません");
+            var root = Json.Parse(json);
+            result.Plan = Json.Plan(Json.Str(root, "plan_type"), null);
+            result.Source = "オンライン"; result.RecordedAt = time;
+            var limits = Json.Obj(root, "rate_limit");
+            foreach (string key in new[] { "primary_window", "secondary_window" })
+            {
+                var window = Json.Obj(limits, key);
+                if (Json.Number(Json.Get(window, "limit_window_seconds")) != 604800) continue;
+                result.Windows[0].Percent = Json.Percent(Json.Get(window, "used_percent"));
+                result.Windows[0].ResetsAt = Json.Date(Json.Get(window, "reset_at"));
+                if (result.HasData) result.Status = "";
+                break;
+            }
+            return result;
+        }
         public static ServiceUsage Grok(string json, DateTimeOffset? time, string source)
         {
             var result = ServiceUsage.Empty("Grok", "週の使用量を取得できません");
