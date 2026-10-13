@@ -42,6 +42,7 @@ class UsageToolbar {
       v.windows.forEach((w,i)=> {
         const slot=ui.slots[i];slot.value.textContent=w.display;slot.fill.style.width=`${Math.min(100,w.percent||0)}%`;
         slot.slot.classList.toggle('is-high',w.active && w.percent>=80);slot.slot.classList.toggle('is-stale',!w.active);
+        slot.slot.classList.toggle('is-unknown',w.percent===null);
         slot.reset.textContent=w.reset;slot.slot.title=`${w.label} ${w.display} / リセット ${w.reset}`;
       });
     });

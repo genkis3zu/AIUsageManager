@@ -25,7 +25,8 @@ namespace AIUsageManager
                 var value=values.FirstOrDefault(v=>v.Name==name)??ServiceUsage.Empty(name,"");var windows=new List<object>();
                 foreach(var window in value.Windows) {
                     var alert=UsageAlerts.ForWindow(value,window,now);
-                    windows.Add(Map("label",window.Label,"percent",window.Percent,"resetsAt",Date(window.ResetsAt),"alert",alert==null?null:Map(
+                    var pace=UsageAlerts.PaceForWindow(value,window,now);
+                    windows.Add(Map("label",window.Label,"percent",window.Percent,"resetsAt",Date(window.ResetsAt),"pace",pace==null?null:Map("summary",pace.Summary,"detail",pace.Detail),"alert",alert==null?null:Map(
                         "title",alert.Title,"detail",alert.Detail,"threshold",alert.Threshold,"rapidIncrease",alert.RapidIncrease,"forecastAt",Date(alert.ForecastAt))));
                 }
                 services.Add(Map("name",name,"plan",value.Plan,"source",value.Source,"status",value.Status,"needsLogin",value.NeedsLogin,

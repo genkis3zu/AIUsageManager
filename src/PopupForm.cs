@@ -40,6 +40,12 @@ namespace AIUsageManager
         public void ApplyTheme(ThemePalette value) { palette=value;BackColor=value.Surface;ForeColor=value.Ink;login.BackColor=value.Surface;login.ForeColor=value.Blue;login.FlatAppearance.MouseOverBackColor=value.Hover;Invalidate(); }
         static string Stamp(ServiceUsage value)
         { return value.RecordedAt.HasValue ? "取得 "+value.RecordedAt.Value.ToLocalTime().ToString("MM/dd HH:mm:ss") : (value.HasData ? "取得時刻不明" : "取得時刻 —"); }
+        internal static int AlertHeight(UsageAlert alert)
+        {
+            using(var bitmap=new Bitmap(1,1))using(var g=Graphics.FromImage(bitmap))
+            using(var font=new Font("Yu Gothic UI",10,FontStyle.Regular,GraphicsUnit.Pixel))
+                return Math.Max(62,(int)Math.Ceiling(g.MeasureString(alert.Detail,font,329).Height)+35);
+        }
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);if(usage==null)return;
@@ -60,7 +66,7 @@ namespace AIUsageManager
                 Artwork.Text(g,w.Label,11,false,palette.Muted,new RectangleF(left,41,35,20),false);
                 Artwork.Text(g,UsageText.Percent(w.Percent),12,true,w.Percent.HasValue?fill:palette.Muted,new RectangleF(left+column-60,40,51,20),true);
                 float barLeft=left+(count==2?36:26),barWidth=column-(count==2?94:84);
-                Artwork.Pill(g,palette.Track,new RectangleF(barLeft,49,barWidth,5));
+                if(w.Percent.HasValue)Artwork.Pill(g,palette.Track,new RectangleF(barLeft,49,barWidth,5));
                 if(w.Percent.HasValue && w.Percent>0)Artwork.Pill(g,fill,new RectangleF(barLeft,49,(float)(barWidth*Math.Min(100,w.Percent.Value)/100),5));
                 if(!w.Percent.HasValue)Artwork.Text(g,"—",10,false,palette.Muted,new RectangleF(barLeft,41,barWidth,18),false);
                 Artwork.Text(g,UsageText.Reset(w,DateTimeOffset.Now),10,false,expired?palette.Red:palette.Muted,new RectangleF(left,63,column-6,18),false);
@@ -72,15 +78,16 @@ namespace AIUsageManager
             if(!string.IsNullOrEmpty(usage.Status))Artwork.Text(g,usage.Status,10,false,palette.Warning,new RectangleF(39,105,usage.NeedsLogin?253:349,18),false);
             float warningTop=string.IsNullOrEmpty(usage.Status)?110:128;
             foreach(var alert in UsageAlerts.ForDisplay(usage,DateTimeOffset.Now)) {
-                Color ink=alert.Threshold>=95?palette.Red:palette.Warning;
-                using(var background=new SolidBrush(Color.FromArgb(20,ink)))g.FillRectangle(background,39,warningTop,349,62);
-                using(var edge=new SolidBrush(ink))g.FillRectangle(edge,39,warningTop,3,62);
+                Color ink=alert.Informational?palette.Blue:alert.Threshold>=95?palette.Red:palette.Warning;
+                int height=AlertHeight(alert);
+                using(var background=new SolidBrush(Color.FromArgb(20,ink)))g.FillRectangle(background,39,warningTop,349,height);
+                using(var edge=new SolidBrush(ink))g.FillRectangle(edge,39,warningTop,3,height);
                 Artwork.Text(g,alert.Title,12,true,ink,new RectangleF(49,warningTop+6,331,20),false);
                 using(var font=new Font("Yu Gothic UI",10,FontStyle.Regular,GraphicsUnit.Pixel))
                 using(var brush=new SolidBrush(palette.Ink))
                 using(var format=new StringFormat {Trimming=StringTrimming.EllipsisCharacter})
-                    g.DrawString(alert.Detail,font,brush,new RectangleF(49,warningTop+27,329,32),format);
-                warningTop+=68;
+                    g.DrawString(alert.Detail,font,brush,new RectangleF(49,warningTop+27,329,height-30),format);
+                warningTop+=height+6;
             }
             using(var pen=new Pen(palette.Separator))g.DrawLine(pen,39,Height/scale-1,388,Height/scale-1);
         }
@@ -153,7 +160,7 @@ namespace AIUsageManager
         void LayoutRows() { LayoutRows(Screen.FromControl(this).WorkingArea); }
         void LayoutRows(Rectangle area)
         {
-            var heights=rows.Select(row=>(string.IsNullOrEmpty(row.Usage.Status)?116:134)+68*UsageAlerts.ForDisplay(row.Usage,DateTimeOffset.Now).Length).ToArray();
+            var heights=rows.Select(row=>(string.IsNullOrEmpty(row.Usage.Status)?116:134)+UsageAlerts.ForDisplay(row.Usage,DateTimeOffset.Now).Sum(a=>UsageRow.AlertHeight(a)+6)).ToArray();
             int total=heights.Sum(height=>P(height));
             int available=Math.Max(P(80),area.Height-P(16)-P(112));
             int viewport=Math.Min(total,available),y=0,scroll=-content.AutoScrollPosition.Y;

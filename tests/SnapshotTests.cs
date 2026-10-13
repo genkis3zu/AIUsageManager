@@ -13,6 +13,12 @@ internal static partial class Tests
 {
     static void RunSnapshotTests()
     {
+        Check("Snapshot carries a recent pace basis and drops it when stale",()=> {
+            var values=WidgetCards.Sample(T);values[1].Source="オンライン";values[1].Windows[0].Percent=36;
+            values[1].Windows[0].Pace=UsagePace.Calculate(values[1].Windows[0],3,30,0.25,T);
+            var current=UsageSnapshot.Create(values,T,false);var stale=UsageSnapshot.Create(values,T.AddMinutes(16),false);
+            Assert(current.Contains("4.5日") && current.Contains("直近30分") && !stale.Contains("4.5日") && !stale.Contains("直近30分"));
+        });
         Check("Snapshot preserves missing, zero, timestamps and warning display fields",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[0].Percent=0;values[0].Windows[1].Percent=100;values[1].Windows[0].Percent=null;
             string json=UsageSnapshot.Create(values,T,false);

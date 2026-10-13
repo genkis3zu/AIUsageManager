@@ -138,6 +138,7 @@ namespace AIUsageManager
             result.Windows[0].Percent = Json.Percent(Json.Get(config, "creditUsagePercent"));
             result.Windows[0].ResetsAt = end;
             if (result.HasData) result.Status = "";
+            else if (source == "オンライン") result.Status = config.ContainsKey("creditUsagePercent") ? "使用率の形式を確認できません" : "認証済み・使用率は未報告です";
             return result;
         }
     }

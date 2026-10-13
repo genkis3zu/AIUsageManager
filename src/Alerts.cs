@@ -9,7 +9,7 @@ namespace AIUsageManager
     public sealed class UsageAlert
     {
         public int Threshold;
-        public bool RapidIncrease, Forecast;
+        public bool RapidIncrease, Forecast, Informational;
         public DateTimeOffset? ForecastAt;
         public string Title = "", Detail = "", Compact = "";
     }
@@ -27,6 +27,8 @@ namespace AIUsageManager
             public DateTimeOffset? ResetAt, LastAt, LastNotice;
             public double LastPercent;
             public int HighestThreshold, NotifiedTrends;
+            public UsagePace Pace;
+            public UsageAlert Alert;
             public readonly List<Sample> Samples = new List<Sample>();
         }
         readonly Dictionary<string, WindowState> states = new Dictionary<string, WindowState>();
@@ -53,13 +55,13 @@ namespace AIUsageManager
             var alert=new UsageAlert {Threshold=threshold,RapidIncrease=rapid,Forecast=forecast.HasValue,ForecastAt=forecast};
             if(threshold>=100) { alert.Title=label+"上限に達しています";alert.Compact=label+"上限到達"; }
             else if(threshold>=90) { alert.Title=label+"使用量"+Number(window.Percent.Value)+"%・残り"+Number(Math.Max(0,100-window.Percent.Value))+"%";alert.Compact=label+(threshold>=95?"上限目前":"残りわずか"); }
-            else if(forecast.HasValue) { alert.Title=label+"リセット前に上限の見込み";alert.Compact=label+"上限予測"; }
+            else if(forecast.HasValue) { alert.Title=label+Number(window.Percent.Value)+"% · "+window.Pace.TargetText+"（推定）";alert.Compact=label+"上限予測"; }
             else { alert.Title=label+"使用量が急増しています";alert.Compact=label+"急増"; }
             var details=new List<string>();
             if(threshold>=100)details.Add(window.ResetsAt.HasValue?"リセット予定："+window.ResetsAt.Value.ToLocalTime().ToString("MM/dd HH:mm"):"リセット時刻は未取得です");
             else {
                 if(rapid)details.Add("急増：直近"+Number(minutes)+"分で +"+Number(rise)+"ポイント");
-                if(forecast.HasValue)details.Add("このペースでは "+forecast.Value.ToLocalTime().ToString("MM/dd HH:mm")+" に上限（推定）");
+                if(window.Pace!=null)details.Add(window.Pace.Detail);
                 if(details.Count==0)details.Add(window.ResetsAt.HasValue?"リセットまで "+Duration(window.ResetsAt.Value-at):"使用量を抑える目安です");
             }
             alert.Detail=string.Join("。",details);return alert;
@@ -68,13 +70,17 @@ namespace AIUsageManager
         {
             var notices=new List<UsageNotice>();
             foreach(var service in values)foreach(var window in service.Windows) {
-                window.Alert=null;
+                window.Alert=null;window.Pace=null;
                 string key=service.Name+"\n"+window.Label;
                 WindowState state;states.TryGetValue(key,out state);
-                if(!Fresh(service,window,now)) { if(state!=null){state.Samples.Clear();state.NotifiedTrends=0;}continue; }
+                if(!Fresh(service,window,now)) { if(state!=null){state.Samples.Clear();state.NotifiedTrends=0;state.Pace=null;state.Alert=null;}continue; }
                 DateTimeOffset at=service.RecordedAt.Value;double percent=window.Percent.Value;
                 // Re-reading a saved observation must not advance history or reset suppression.
-                if(state!=null&&state.LastAt.HasValue&&at<=state.LastAt.Value) { window.Alert=Current(service,window,now);continue; }
+                if(state!=null&&state.LastAt.HasValue&&at<=state.LastAt.Value) {
+                    if(at==state.LastAt.Value&&percent==state.LastPercent){window.Pace=state.Pace;window.Alert=state.Alert??Current(service,window,now);}
+                    else window.Alert=Current(service,window,now);
+                    continue;
+                }
                 bool changedPeriod=state!=null&&state.ResetAt.HasValue&&window.ResetsAt.HasValue&&Math.Abs((window.ResetsAt.Value-state.ResetAt.Value).TotalMinutes)>2;
                 if(state==null||changedPeriod||state.Plan!=service.Plan||(state.LastAt.HasValue&&state.LastPercent-percent>=20)) {
                     state=new WindowState {Plan=service.Plan,ResetAt=window.ResetsAt};states[key]=state;
@@ -91,12 +97,14 @@ namespace AIUsageManager
                 bool rapid=rise>=10&&percent<100;
                 DateTimeOffset? forecast=null;
                 var first=state.Samples[0];double span=(at-first.At).TotalMinutes,delta=percent-first.Percent;
+                window.Pace=UsagePace.Calculate(window,state.Samples.Count,span,delta,at);
                 if(percent<100&&window.ResetsAt.HasValue&&state.Samples.Count>=3&&span>=10&&delta>=2) {
                     var predicted=at.AddMinutes((100-percent)*span/delta);
                     if(predicted>now&&predicted<window.ResetsAt.Value)forecast=predicted;
                 }
                 int level=Level(percent),trends=(rapid?1:0)|(forecast.HasValue?2:0);
                 window.Alert=Describe(window,level,rapid,forecast,at,rise,minutes);
+                state.Pace=window.Pace;state.Alert=window.Alert;
                 bool newThreshold=level>state.HighestThreshold;
                 state.HighestThreshold=Math.Max(level,state.HighestThreshold);
                 state.NotifiedTrends&=trends;
@@ -113,7 +121,13 @@ namespace AIUsageManager
         public static UsageAlert Current(ServiceUsage service, UsageWindow window, DateTimeOffset now)
         { return Fresh(service,window,now)?Describe(window,Level(window.Percent.Value),false,null,now,0,0):null; }
         public static UsageAlert[] ForDisplay(ServiceUsage service,DateTimeOffset now)
-        { return service.Windows.Select(w=>ForWindow(service,w,now)).Where(a=>a!=null).ToArray(); }
+        { return service.Windows.Select(w=> {
+            var alert=ForWindow(service,w,now);if(alert!=null)return alert;
+            var pace=PaceForWindow(service,w,now);
+            return pace==null?null:new UsageAlert {Informational=true,Title=w.Label+"："+pace.Summary,Detail=pace.Detail,Compact=w.Label+"："+pace.TargetText};
+        }).Where(a=>a!=null).ToArray(); }
+        public static UsagePace PaceForWindow(ServiceUsage service,UsageWindow window,DateTimeOffset now)
+        { return Fresh(service,window,now)?window.Pace:null; }
         public static UsageAlert ForWindow(ServiceUsage service,UsageWindow window,DateTimeOffset now)
         { return Fresh(service,window,now)?window.Alert??Current(service,window,now):null; }
         public static string NotificationText(UsageNotice[] notices)

@@ -18,7 +18,7 @@ $files['install-obsidian.ps1'] = Join-Path $PSScriptRoot 'install-obsidian.ps1'
 $files['README.md'] = Join-Path $projectRoot 'docs\obsidian-guide.md'
 $files['LICENSE'] = Join-Path $projectRoot 'LICENSE'
 $files['PRIVACY.md'] = Join-Path $projectRoot 'docs\privacy.md'
-foreach ($image in @('obsidian-standard.png','obsidian-compact.png')) { $files['images\' + $image] = Join-Path $projectRoot ('docs\images\' + $image) }
+foreach ($image in @('obsidian-standard.png','obsidian-compact.png','obsidian-forecast.png')) { $files['images\' + $image] = Join-Path $projectRoot ('docs\images\' + $image) }
 foreach ($name in $files.Keys) { Copy-Item -LiteralPath $files[$name] -Destination (Join-Path $stage $name) }
 $zipName = 'AIUsageManager-' + $manifest.version + '-obsidian.zip'
 $zipPath = Join-Path $distribution $zipName

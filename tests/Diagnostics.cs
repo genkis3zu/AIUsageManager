@@ -38,6 +38,17 @@ internal static class Diagnostics
                     alerts.Observe(values,now.AddMinutes(-10+5*i),NotificationMode.Off);
                 }
             }
+            if(args.Contains("--forecast")) {
+                var alerts=new UsageAlerts();codex.Source="オンライン";
+                values[2]=ServiceUsage.Empty("Grok","再ログインが必要です");values[2].NeedsLogin=true;
+                for(int i=0;i<3;i++) {
+                    claude.RecordedAt=codex.RecordedAt=now.AddMinutes(-30+15*i);
+                    claude.Windows[0].Percent=14;claude.Windows[1].Percent=35.75+0.125*i;claude.Windows[1].ResetsAt=now.AddDays(6);
+                    codex.Windows[0].Percent=21.6+0.2*i;codex.Windows[0].ResetsAt=now.AddDays(5);
+                    alerts.Observe(values,now.AddMinutes(-30+15*i),NotificationMode.Off);
+                }
+                File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"forecast-sample.json"),UsageSnapshot.Create(values,now,false));
+            }
         }
         foreach(var value in values)
             Console.WriteLine(value.Name+" | "+value.Plan+" | "+string.Join(", ",value.Windows.Select(w=>w.Label+"="+UsageText.Percent(w.Percent)))+" | "+value.Source+" | "+(value.RecordedAt.HasValue?value.RecordedAt.Value.ToLocalTime().ToString("s"):"unknown time")+" | "+value.Status);
@@ -52,12 +63,11 @@ internal static class Diagnostics
             {
                 typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,scale);
                 form.SetUsage(values);
-                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,(args.Contains("--live")?"live":args.Contains("--alerts")?"alerts":"sample")+"-"+theme+"-"+(int)(scale*100)+".png"),ImageFormat.Png);}
+                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,(args.Contains("--live")?"live":args.Contains("--forecast")?"forecast":args.Contains("--alerts")?"alerts":"sample")+"-"+theme+"-"+(int)(scale*100)+".png"),ImageFormat.Png);}
             }
             var missing=ServiceUsage.Empty("Claude","CLI で再ログインが必要です");
             var zero=ServiceUsage.Empty("Codex","");zero.Plan="Pro Lite";zero.Windows[0].Percent=0;zero.RecordedAt=DateTimeOffset.Now;
-            var expired=ServiceUsage.Empty("Grok","オンライン未取得・CLI 記録を表示");expired.Plan="SuperGrok Heavy";expired.Windows[0].Percent=100;expired.Windows[0].ResetsAt=DateTimeOffset.Now.AddDays(-1);expired.RecordedAt=DateTimeOffset.Now.AddDays(-7);expired.Source="CLI 記録";
-            expired.NeedsLogin=true;expired.Status="再ログインが必要です・CLI 記録を表示";
+            var expired=ServiceUsage.Empty("Grok","再ログインが必要です");expired.NeedsLogin=true;
             typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(form,1f);form.SetUsage(new[]{missing,zero,expired});
             using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(0,0,image.Width,image.Height));image.Save(Path.Combine(output,"states-"+theme+"-100.png"),ImageFormat.Png);}
         }

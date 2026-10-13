@@ -8,7 +8,7 @@
 |---|---|
 | `.codex/sessions/**/*.jsonl` | Codexの週使用量・観測時刻 |
 | `.codex/auth.json` | Codexの既存ChatGPTログインによる認証 |
-| `.grok/logs/unified.jsonl` | Grokの週使用量とプランの代替情報 |
+| `.grok/logs/unified.jsonl` | Grokの成功応答でプラン名が欠ける場合の補足（使用率には使わない） |
 | `.grok/auth.json` | Grokの既存ログインによる認証 |
 | `.claude/.credentials.json` | Claude Codeの既存ログインによる認証 |
 | `.claude/usage-cache.json` | 存在する場合だけ、Claude使用量の代替情報 |

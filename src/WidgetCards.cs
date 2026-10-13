@@ -49,8 +49,8 @@ namespace AIUsageManager
                 string compactReset=reset.Replace("期限経過・再取得待ち","期限経過").Replace("リセット時刻不明","時刻不明").Replace("時間","h").Replace("日","d").Replace("分","m").Replace(" ","");
                 string label=large?window.Label:window.Label.Replace("時間","h");
                 var windowItems=new List<object>{
-                    Text(label+"  "+UsageText.Percent(window.Percent)+(large?"":" · "+compactReset),window.Percent>=80?"attention":"default",false),
-                    O("type","Image","url",Bar(window.Percent,value.Windows.Count==2?180:360),"size","stretch","spacing","none","altText",window.Label+" "+UsageText.Percent(window.Percent)+" リセット "+reset)};
+                    Text(label+"  "+UsageText.Percent(window.Percent)+(large?"":" · "+compactReset),window.Percent>=80?"attention":"default",false)};
+                if(window.Percent.HasValue)windowItems.Add(O("type","Image","url",Bar(window.Percent,value.Windows.Count==2?180:360),"size","stretch","spacing","none","altText",window.Label+" "+UsageText.Percent(window.Percent)+" リセット "+reset));
                 if(large)windowItems.Add(Text(window.ResetsAt.HasValue&&window.ResetsAt>now?"リセット "+reset:reset,"default",true));
                 columns.Add(O("type","Column","width","stretch","spacing","small","items",windowItems));
             }

@@ -48,6 +48,12 @@ internal static partial class Tests
         });
         Check("Grok billing explicit zero", () => Assert(UsageParser.Grok("{\"config\":{\"creditUsagePercent\":0,\"currentPeriod\":{\"periodType\":\"weekly\"}}}", T,"API").Windows[0].Percent==0));
         Check("Grok absent percentage is not zero", () => Assert(!UsageParser.Grok("{\"config\":{\"currentPeriod\":{\"type\":\"weekly\",\"end\":\"2026-10-13T09:00:00Z\"}}}", T,"API").HasData));
+        Check("Grok successful period-only response distinguishes unreported usage from login failure", () => {
+            var r=UsageParser.Grok("{\"config\":{\"currentPeriod\":{\"type\":\"weekly\",\"start\":\"2026-10-10T08:00:00Z\",\"end\":\"2026-10-17T08:00:00Z\"}}}", T,"オンライン");
+            Assert(!r.HasData && !r.NeedsLogin && r.Status.Contains("認証済み") && r.Status.Contains("未報告") && r.Windows[0].ResetsAt.HasValue);
+            var malformed=UsageParser.Grok("{\"config\":{\"creditUsagePercent\":\"invalid\",\"currentPeriod\":{\"type\":\"weekly\"}}}",T,"オンライン");
+            Assert(!malformed.HasData && malformed.Status.Contains("形式"));
+        });
         Check("Grok monthly rejected", () => Assert(!UsageParser.Grok("{\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"monthly\"}}}", T,"API").HasData));
         Check("Grok no period rejected", () => Assert(!UsageParser.Grok("{\"config\":{\"creditUsagePercent\":42}}", T,"API").HasData));
         Check("Over-limit percent is preserved", () => Assert(UsageParser.Grok("{\"config\":{\"creditUsagePercent\":125,\"currentPeriod\":{\"type\":\"weekly\"}}}", T,"API").Windows[0].Percent==125));
