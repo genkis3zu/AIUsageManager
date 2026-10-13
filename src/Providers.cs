@@ -271,6 +271,10 @@ namespace AIUsageManager
                 if (response.Body != null)
                 {
                     var result = UsageParser.Grok(response.Body, DateTimeOffset.UtcNow, "オンライン");
+                    if (!result.HasData) {
+                        var confirmed=await GrokWebBilling.ConfirmUnreportedAsync(http,Json.Str(selected,"key"),response.Body,cancellation).ConfigureAwait(false);
+                        if(confirmed.HasValue) {result.Windows[0].Percent=confirmed;result.Status="";}
+                    }
                     if (result.Plan == "プラン未取得")
                     {
                         var log = FileSources.Grok(profile);

@@ -62,6 +62,7 @@ internal static partial class Tests
         Check("Zero and unknown text differ", () => Assert(UsageText.Percent(0)=="0%" && UsageText.Percent(null)=="未取得"));
         Check("Expired data requests fresh observation", () => Assert(UsageText.Reset(new UsageWindow("週",50,T), T.AddMinutes(1)).Contains("再取得待ち")));
         RunProviderTests();
+        RunGrokWebTests();
         RunWidgetTests();
         RunAlertTests();
         RunSnapshotTests();

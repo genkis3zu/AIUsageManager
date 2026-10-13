@@ -16,6 +16,7 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Artwork.cs` | 描画補助、サービスの印、埋込アプリアイコン |
 | `Models.cs` / `Parsers.cs` | 表示用モデル、欠損値・期間・時刻の解釈 |
 | `Providers.cs` | 読み取り専用ファイル処理、固定HTTPS GET、代替情報 |
+| `GrokWebBilling.cs` | Grokの使用率省略時の読取照会、完結した週の応答検証と0%の解釈 |
 | `Login.cs` | ユーザー操作による公式CLIのOAuth起動と終了待機 |
 | `Theme.cs` | 配色、Windows設定参照、テーマ・通知設定保存、メニュー描画 |
 
