@@ -236,6 +236,29 @@ namespace AIUsageManager
             catch (UnauthorizedAccessException) { }
             var missing = ServiceUsage.Empty("Claude", error); missing.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier")); return missing;
         }
+        static HttpRequestMessage GrokRequest(Dictionary<string, object> login, bool settings)
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, settings ?
+                "https://cli-chat-proxy.grok.com/v1/settings" : "https://cli-chat-proxy.grok.com/v1/billing?format=credits");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Json.Str(login, "key"));
+            request.Headers.Add("X-XAI-Token-Auth", "xai-grok-cli");
+            request.Headers.Add("x-grok-client-mode", "cli");
+            request.Headers.Add("x-grok-client-version", "1.0.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            string userId = Json.Str(login, "user_id");
+            if (!string.IsNullOrEmpty(userId)) request.Headers.Add("x-userid", userId);
+            return request;
+        }
+        async Task<string> GrokCurrentPlan(Dictionary<string, object> login, CancellationToken cancellation)
+        {
+            // Optional metadata must not hold a successful usage result for the full HTTP timeout.
+            using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation))
+            {
+                timeout.CancelAfter(TimeSpan.FromSeconds(2));
+                var response = await Get(GrokRequest(login, true), timeout.Token).ConfigureAwait(false);
+                return Json.GrokPlan(Json.Str(Json.Parse(response.Body), "subscription_tier_display"));
+            }
+        }
         async Task<ServiceUsage> Grok(CancellationToken cancellation)
         {
             Dictionary<string, object> selected = null;
@@ -260,14 +283,7 @@ namespace AIUsageManager
             var end = Json.Date(Json.Get(selected, "expires_at"));
             if (selected != null && (!end.HasValue || end > DateTimeOffset.UtcNow))
             {
-                var request = new HttpRequestMessage(HttpMethod.Get, "https://cli-chat-proxy.grok.com/v1/billing?format=credits");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Json.Str(selected, "key"));
-                request.Headers.Add("X-XAI-Token-Auth", "xai-grok-cli");
-                request.Headers.Add("x-grok-client-mode", "cli");
-                request.Headers.Add("x-grok-client-version", "1.0.0");
-                string userId = Json.Str(selected, "user_id");
-                if (!string.IsNullOrEmpty(userId)) request.Headers.Add("x-userid", userId);
-                var response = await Get(request, cancellation).ConfigureAwait(false);
+                var response = await Get(GrokRequest(selected, false), cancellation).ConfigureAwait(false);
                 if (response.Body != null)
                 {
                     var result = UsageParser.Grok(response.Body, DateTimeOffset.UtcNow, "オンライン");
@@ -275,6 +291,10 @@ namespace AIUsageManager
                         var confirmed=await GrokWebBilling.ConfirmUnreportedAsync(http,Json.Str(selected,"key"),response.Body,cancellation).ConfigureAwait(false);
                         if(confirmed.HasValue) {result.Windows[0].Percent=confirmed;result.Status="";}
                     }
+                    string currentPlan = await GrokCurrentPlan(selected, cancellation).ConfigureAwait(false);
+                    if (currentPlan != "プラン未取得") result.Plan = currentPlan;
+                    if (result.Plan.StartsWith("SuperGrok", StringComparison.Ordinal))
+                        result.PlanNote = "取得先が返したプラン名です。契約変更が未反映の場合は旧名が表示されます。";
                     if (result.Plan == "プラン未取得")
                     {
                         var log = FileSources.Grok(profile);

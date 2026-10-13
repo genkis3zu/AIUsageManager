@@ -21,12 +21,15 @@ AI Usage Managerの取得処理は、これらのファイルへの書き込み�
 |---|---|---|
 | Claude | GET `api.anthropic.com/api/oauth/usage` | 既存ログインのBearerトークン |
 | Grok | GET `cli-chat-proxy.grok.com/v1/billing?format=credits` | 既存ログインのBearerトークンと、存在すればユーザーIDヘッダー |
+| Grokのプラン名 | GET `cli-chat-proxy.grok.com/v1/settings` | 上記と同じBearerトークンとユーザーIDヘッダー |
 | Grokの使用率補完 | 読取専用POST `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` | 上記と同じBearerトークン（Cookieなし） |
 | Codex | GET `chatgpt.com/backend-api/wham/usage` | 既存ChatGPTログインのBearerトークンと、存在すればアカウントIDヘッダー |
 
 リダイレクトとCookieは無効、証明書はWindows標準検証、タイムアウトは15秒、応答上限は1 MiBです。テレメトリー、分析SDK、独自バックエンド、自動更新確認はありません。サービス側は通常の認証リクエストに伴う情報を受け取ります。
 
 Grokの追加照会は、有効な現在の週が返り使用率だけが省略された場合に限り、最大6秒で1回実行します。固定の使用量照会メッセージを送り、購入・自動チャージ・クレジットの利用・設定変更は行いません。応答はメモリで検証し、使用率だけを同じ週の表示へ反映します。
+
+Grokのプラン名は請求情報の取得成功後、最大2秒の追加GETで確認します。設定応答から利用するのは `subscription_tier_display` の既知の名前だけです。他の設定や応答本文は保存・表示しません。失敗時も取得済みの使用量は保持します。
 
 ## ユーザーが開始するログイン
 

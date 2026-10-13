@@ -52,10 +52,25 @@ namespace AIUsageManager
                 case "business": return "Business";
                 case "enterprise": return "Enterprise";
                 case "edu": return "Edu";
+                case "premium": return "Premium";
+                case "premium+": return "Premium+";
+                default: return "プラン未取得";
+            }
+        }
+        public static string GrokPlan(string name)
+        {
+            // Legacy subscriptions remain valid; Heavy does not prove an Ultra migration.
+            switch ((name ?? "").Trim().ToLowerInvariant())
+            {
+                case "free": return "Free";
+                case "plus": return "Plus";
+                case "premium": return "Premium";
+                case "super": return "Super";
+                case "ultra": return "Ultra";
                 case "supergrok": return "SuperGrok";
+                case "supergrok plus": return "SuperGrok Plus";
                 case "supergrok heavy": return "SuperGrok Heavy";
                 case "supergrok lite": return "SuperGrok Lite";
-                case "premium": return "Premium";
                 case "premium+": return "Premium+";
                 default: return "プラン未取得";
             }
@@ -125,7 +140,7 @@ namespace AIUsageManager
             var result = ServiceUsage.Empty("Grok", "週の使用量を取得できません");
             var root = Json.Parse(json);
             var body = Json.Obj(root, "ctx") ?? root;
-            result.Plan = Json.Plan(Json.Str(body, "subscriptionTier"), null);
+            result.Plan = Json.GrokPlan(Json.Str(body, "subscriptionTier"));
             result.Source = source; result.RecordedAt = time ?? Json.Date(Json.Get(root, "ts"));
             var config = Json.Obj(body, "config");
             var period = Json.Obj(config, "currentPeriod");

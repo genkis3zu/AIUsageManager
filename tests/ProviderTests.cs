@@ -14,12 +14,22 @@ internal static partial class Tests
         public int Calls;
         public bool OmitPlan;
         public bool HeadersCorrect = true;
+        public int SettingsCalls;
+        public string SettingsBody="{}";
+        public HttpStatusCode SettingsStatus=HttpStatusCode.OK;
+        public bool SettingsWaitForCancellation;
         public string CodexBody = "{\"plan_type\":\"prolite\",\"rate_limit\":{\"primary_window\":{\"used_percent\":7,\"limit_window_seconds\":604800,\"reset_at\":1791952268}}}";
         public HttpStatusCode Status = HttpStatusCode.OK;
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
-            Calls++;
+            Interlocked.Increment(ref Calls);
             HeadersCorrect &= request.Method == HttpMethod.Get && request.RequestUri.Scheme == "https" && request.Headers.Authorization.Scheme == "Bearer";
+            if(request.RequestUri.AbsoluteUri=="https://cli-chat-proxy.grok.com/v1/settings") {
+                SettingsCalls++;
+                HeadersCorrect &= request.Headers.Authorization.Parameter=="fixture-grok" && request.Headers.GetValues("X-XAI-Token-Auth").Single()=="xai-grok-cli" && !request.Headers.Contains("Cookie");
+                if(SettingsWaitForCancellation)return WaitForSettingsCancellation(token);
+                return Task.FromResult(new HttpResponseMessage(SettingsStatus){Content=new StringContent(SettingsBody)});
+            }
             bool claude = request.RequestUri.Host == "api.anthropic.com";
             if (request.RequestUri.Host == "chatgpt.com")
             {
@@ -29,6 +39,8 @@ internal static partial class Tests
             HeadersCorrect &= claude ? request.Headers.Contains("anthropic-beta") : request.RequestUri.Host == "cli-chat-proxy.grok.com" && request.Headers.Contains("X-XAI-Token-Auth");
             return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status != HttpStatusCode.OK ? "sensitive-server-error" : claude ? "{\"five_hour\":{\"utilization\":1},\"seven_day\":{\"utilization\":98}}" : "{\"subscriptionTier\":"+(OmitPlan?"null":"\"SuperGrok Heavy\"")+",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"weekly\"}}}") });
         }
+        static async Task<HttpResponseMessage> WaitForSettingsCancellation(CancellationToken token)
+        { await Task.Delay(Timeout.Infinite,token);return new HttpResponseMessage(HttpStatusCode.OK); }
     }
     static string Fixture()
     {
@@ -178,7 +190,7 @@ internal static partial class Tests
             var root=Fixture();Auth(root); var paths=Directory.GetFiles(root,"*",SearchOption.AllDirectories);var bytes=paths.Select(File.ReadAllText).ToArray();
             using(var handler=new FakeHttp()) using(var http=new HttpClient(handler)) {
                 var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();
-                Assert(values[0].Windows[1].Percent==98 && values[0].Plan=="Max 20x" && values[2].Windows[0].Percent==42 && handler.Calls==2 && handler.HeadersCorrect);
+                Assert(values[0].Windows[1].Percent==98 && values[0].Plan=="Max 20x" && values[2].Windows[0].Percent==42 && handler.Calls==3 && handler.HeadersCorrect);
             }
             Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
         });
@@ -193,7 +205,7 @@ internal static partial class Tests
             var root=Fixture();Auth(root);var path=Path.Combine(root,".claude",".credentials.json");File.WriteAllText(path,"{\"claudeAiOauth\":{\"accessToken\":\"expired\",\"expiresAt\":1000}}");
             using(var handler=new FakeHttp()) using(var http=new HttpClient(handler)) {
                 var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();
-                Assert(!values[0].HasData && values[0].Status.Contains("ログイン") && handler.Calls==1 && File.ReadAllText(path).Contains("expired"));
+                Assert(!values[0].HasData && values[0].Status.Contains("ログイン") && handler.Calls==2 && File.ReadAllText(path).Contains("expired"));
             }
         });
         Check("Unrecognized Grok credential issuer ignored", () => {
@@ -205,7 +217,51 @@ internal static partial class Tests
         Check("Missing live Grok plan uses labeled log plan", () => {
             var root=Fixture();Auth(root);File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"subscriptionTier\":\"SuperGrok Heavy\",\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
             using(var handler=new FakeHttp { OmitPlan=true }) using(var http=new HttpClient(handler)) {
-                var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();Assert(values[2].Windows[0].Percent==42 && values[2].Plan=="SuperGrok Heavy");
+                var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();Assert(values[2].Windows[0].Percent==42 && values[2].Plan=="SuperGrok Heavy" && values[2].PlanNote.Contains("CLI 記録"));
+            }
+        });
+        Check("Current Grok plan replaces legacy billing and logs on every refresh",()=> {
+            var root=Fixture();Auth(root);
+            File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ctx\":{\"subscriptionTier\":\"SuperGrok Heavy\",\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
+            using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                var service=new UsageService(root,http);
+                foreach(var plan in new[]{"Ultra","Super","Premium"}) {
+                    handler.SettingsBody="{\"subscription_tier_display\":\""+plan+"\",\"private_field\":\"never-display\"}";
+                    var value=service.FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                    Assert(value.Plan==plan && value.Windows[0].Percent==42 && value.Source=="オンライン" && string.IsNullOrEmpty(value.PlanNote) && !value.NeedsLogin);
+                }
+                Assert(handler.SettingsCalls==3 && handler.HeadersCorrect);
+            }
+        });
+        Check("Grok optional settings failures preserve successful billing",()=> {
+            var root=Fixture();Auth(root);
+            foreach(var status in new[]{HttpStatusCode.Unauthorized,HttpStatusCode.Forbidden,HttpStatusCode.ServiceUnavailable,(HttpStatusCode)429})
+            using(var handler=new FakeHttp{SettingsStatus=status,SettingsBody="sensitive-server-error"})using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                Assert(value.Plan=="SuperGrok Heavy" && value.Windows[0].Percent==42 && value.Status=="" && !value.NeedsLogin && handler.SettingsCalls==1);
+            }
+        });
+        Check("Grok unknown or malformed settings never display arbitrary response fields",()=> {
+            var root=Fixture();Auth(root);
+            foreach(var body in new[]{"{partial","{}","{\"subscription_tier_display\":null}","{\"subscription_tier_display\":{\"secret\":1}}","{\"subscription_tier_display\":\"private-value\"}"})
+            using(var handler=new FakeHttp{OmitPlan=true,SettingsBody=body})using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                Assert(value.Plan=="プラン未取得" && value.Windows[0].Percent==42 && value.Status=="" && handler.SettingsCalls==1);
+            }
+        });
+        Check("Grok optional settings timeout is bounded and retains usage",()=> {
+            var root=Fixture();Auth(root);
+            using(var handler=new FakeHttp{SettingsWaitForCancellation=true})using(var http=new HttpClient(handler)) {
+                var watch=System.Diagnostics.Stopwatch.StartNew();
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                Assert(value.Windows[0].Percent==42 && !value.NeedsLogin && handler.SettingsCalls==1 && watch.Elapsed<TimeSpan.FromSeconds(5));
+            }
+        });
+        Check("Grok settings is skipped when billing authentication fails",()=> {
+            var root=Fixture();Auth(root);
+            using(var handler=new FakeHttp{Status=HttpStatusCode.Unauthorized,SettingsBody="{\"subscription_tier_display\":\"Ultra\"}"})using(var http=new HttpClient(handler)) {
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                Assert(!value.HasData && value.NeedsLogin && handler.SettingsCalls==0);
             }
         });
         Check("Malformed credential cannot suppress Codex", () => {
