@@ -271,6 +271,10 @@ namespace AIUsageManager
                 if (response.Body != null)
                 {
                     var result = UsageParser.Grok(response.Body, DateTimeOffset.UtcNow, "オンライン");
+                    if (!result.HasData) {
+                        var confirmed=await GrokWebBilling.ConfirmUnreportedAsync(http,Json.Str(selected,"key"),response.Body,cancellation).ConfigureAwait(false);
+                        if(confirmed.HasValue) {result.Windows[0].Percent=confirmed;result.Status="";}
+                    }
                     if (result.Plan == "プラン未取得")
                     {
                         var log = FileSources.Grok(profile);
@@ -286,10 +290,9 @@ namespace AIUsageManager
                 else { error = response.Error; login = response.NeedsLogin; }
             }
             else if (selected != null) error = "Grok CLI で再ログインが必要です";
-            var fallback = FileSources.Grok(profile);
-            fallback.NeedsLogin = login;
-            fallback.Status = error + (fallback.HasData ? "・CLI 記録を表示" : "");
-            return fallback;
+            // Billing failures must never resurrect an unrelated, older CLI percentage.
+            // In particular, a timeout after HTTP 401 is not evidence of a new login.
+            var missing=ServiceUsage.Empty("Grok",error);missing.NeedsLogin=login;return missing;
         }
     }
 }

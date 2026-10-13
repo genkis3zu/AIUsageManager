@@ -111,18 +111,40 @@ internal static partial class Tests
                 var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(!value.HasData && handler.Calls==0);
             }
         });
-        Check("Grok expired OAuth fallback explains login requirement", () => {
+        Check("Grok expired OAuth never revives old CLI usage", () => {
             var root=Fixture();File.WriteAllText(Path.Combine(root,".grok","auth.json"),"{\"https://auth.x.ai::test\":{\"key\":\"expired\",\"expires_at\":\"2000-01-01T00:00:00Z\",\"refresh_token\":\"never-use\"}}");
             File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
             using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
                 var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
-                Assert(value.Windows[0].Percent==35 && value.RecordedAt==T && value.NeedsLogin && value.Status.Contains("ログイン") && handler.Calls==0);
+                Assert(!value.HasData && !value.RecordedAt.HasValue && value.NeedsLogin && value.Status.Contains("ログイン") && handler.Calls==0);
+            }
+        });
+        Check("Grok missing login and HTTP 401 hide old CLI usage", () => {
+            foreach(bool authenticated in new[]{false,true}) {
+                var root=Fixture();if(authenticated)Auth(root);
+                File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
+                using(var http=new HttpClient(new FakeHttp {Status=HttpStatusCode.Unauthorized})) {
+                    var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                    Assert(value.NeedsLogin && !value.HasData && !value.RecordedAt.HasValue && !value.Status.Contains("CLI 記録"));
+                }
             }
         });
         Check("Grok forbidden response is not reported as expired authentication", () => {
             var root=Fixture();Auth(root);
             using(var http=new HttpClient(new FakeHttp { Status=HttpStatusCode.Forbidden })) {
                 var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];Assert(!value.HasData && !value.Status.Contains("ログイン"));
+            }
+        });
+        Check("Grok fetch errors never replace current usage with an old CLI percentage",()=> {
+            var root=Fixture();Auth(root);
+            File.WriteAllText(Path.Combine(root,".grok","logs","unified.jsonl"),"{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"config\":{\"creditUsagePercent\":35,\"currentPeriod\":{\"type\":\"weekly\"}}}}");
+            using(var handler=new FakeHttp())using(var http=new HttpClient(handler)) {
+                var service=new UsageService(root,http);
+                Assert(service.FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2].Windows[0].Percent==42);
+                foreach(var status in new[]{HttpStatusCode.Unauthorized,HttpStatusCode.ServiceUnavailable,(HttpStatusCode)429,HttpStatusCode.Forbidden}) {
+                    handler.Status=status;var value=service.FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[2];
+                    Assert(!value.HasData && !value.RecordedAt.HasValue && !value.Status.Contains("CLI 記録"));
+                }
             }
         });
         Check("Read latest valid record through partial tail", () => {

@@ -41,3 +41,23 @@ test('settings preserve only supported mode and an absolute executable path',()=
   assert.deepEqual(normalizeSettings({mode:'compact',appPath:'C:\\Apps\\AIUsageManager.exe'}),{mode:'compact',appPath:'C:\\Apps\\AIUsageManager.exe'});
 });
 module.exports={payload,now};
+
+test('Grok login requirement hides legacy usage and reset information',()=> {
+  const p=payload();const s=p.services[2];s.needsLogin=true;s.windows[0].percent=35;s.status='再ログインが必要です';
+  const v=presentService(parseSnapshot(JSON.stringify(p)).services[2],true,now);
+  assert.equal(v.windows[0].display,'未取得');assert.equal(v.windows[0].percent,null);assert.equal(v.stamp,'未取得');
+  assert.doesNotMatch(v.tooltip,/35%/);assert.match(v.state,/ログイン/);
+});
+
+test('pace summary and observation basis remain visible without a warning',()=> {
+  const p=payload();p.services[1].windows[0].percent=36;p.services[1].windows[0].pace={summary:'90%まで約4.5日 · +12pt/日（推定）',detail:'現在36%。直近30分で +0.25ポイント。リセットが先'};
+  const v=presentService(parseSnapshot(JSON.stringify(p)).services[1],true,now);
+  assert.equal(v.severity,'normal');assert.match(v.state,/90%まで約4.5日/);assert.match(v.tooltip,/直近30分/);
+  const stale=presentService(parseSnapshot(JSON.stringify(p)).services[1],true,now+16*60000);
+  assert.doesNotMatch(stale.tooltip,/4.5日|直近30分/);
+});
+
+test('fresh readings without enough history explain collection rather than inventing an ETA',()=> {
+  const v=presentService(parseSnapshot(JSON.stringify(payload())).services[1],true,now);
+  assert.match(v.state,/観測中/);assert.match(v.state,/10分/);assert.doesNotMatch(v.state,/90%まで約/);
+});

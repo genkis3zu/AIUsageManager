@@ -9,12 +9,14 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Program.cs` | 起動、同一ユーザー内の単一起動と表示シグナル |
 | `TrayContext.cs` | 常駐、5分更新、テーマ・通知選択、Windows通知、終了時の解放 |
 | `Alerts.cs` | 閾値・急増・到達予測、メモリ内の観測履歴と通知抑止 |
+| `Pace.cs` | 直近の増加速度、90%・95%・100%の到達時期と観測根拠 |
 | `Snapshot.cs` | Obsidian向け表示データ、現在ユーザー限定の名前付きパイプ、時間・出力量の上限 |
 | `obsidian/src/` | 固定ツールバー、表示サイズ、鮮度判定、常駐アプリとの連携 |
 | `PopupForm.cs` | 使用量と警告帯、ボタン、キーボード、スクロール・DPIレイアウト |
 | `Artwork.cs` | 描画補助、サービスの印、埋込アプリアイコン |
 | `Models.cs` / `Parsers.cs` | 表示用モデル、欠損値・期間・時刻の解釈 |
 | `Providers.cs` | 読み取り専用ファイル処理、固定HTTPS GET、代替情報 |
+| `GrokWebBilling.cs` | Grokの使用率省略時の読取照会、完結した週の応答検証と0%の解釈 |
 | `Login.cs` | ユーザー操作による公式CLIのOAuth起動と終了待機 |
 | `Theme.cs` | 配色、Windows設定参照、テーマ・通知設定保存、メニュー描画 |
 

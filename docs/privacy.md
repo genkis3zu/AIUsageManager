@@ -8,7 +8,7 @@
 |---|---|
 | `.codex/sessions/**/*.jsonl` | Codexの週使用量・観測時刻 |
 | `.codex/auth.json` | Codexの既存ChatGPTログインによる認証 |
-| `.grok/logs/unified.jsonl` | Grokの週使用量とプランの代替情報 |
+| `.grok/logs/unified.jsonl` | Grokの成功応答でプラン名が欠ける場合の補足（使用率には使わない） |
 | `.grok/auth.json` | Grokの既存ログインによる認証 |
 | `.claude/.credentials.json` | Claude Codeの既存ログインによる認証 |
 | `.claude/usage-cache.json` | 存在する場合だけ、Claude使用量の代替情報 |
@@ -17,13 +17,16 @@ AI Usage Managerの取得処理は、これらのファイルへの書き込み�
 
 ## 通信
 
-| サービス | HTTPS GETの宛先 | 認証 |
+| サービス | HTTPSの宛先・メソッド | 認証 |
 |---|---|---|
-| Claude | `api.anthropic.com/api/oauth/usage` | 既存ログインのBearerトークン |
-| Grok | `cli-chat-proxy.grok.com/v1/billing?format=credits` | 既存ログインのBearerトークンと、存在すればユーザーIDヘッダー |
-| Codex | `chatgpt.com/backend-api/wham/usage` | 既存ChatGPTログインのBearerトークンと、存在すればアカウントIDヘッダー |
+| Claude | GET `api.anthropic.com/api/oauth/usage` | 既存ログインのBearerトークン |
+| Grok | GET `cli-chat-proxy.grok.com/v1/billing?format=credits` | 既存ログインのBearerトークンと、存在すればユーザーIDヘッダー |
+| Grokの使用率補完 | 読取専用POST `grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` | 上記と同じBearerトークン（Cookieなし） |
+| Codex | GET `chatgpt.com/backend-api/wham/usage` | 既存ChatGPTログインのBearerトークンと、存在すればアカウントIDヘッダー |
 
 リダイレクトとCookieは無効、証明書はWindows標準検証、タイムアウトは15秒、応答上限は1 MiBです。テレメトリー、分析SDK、独自バックエンド、自動更新確認はありません。サービス側は通常の認証リクエストに伴う情報を受け取ります。
+
+Grokの追加照会は、有効な現在の週が返り使用率だけが省略された場合に限り、最大6秒で1回実行します。固定の使用量照会メッセージを送り、購入・自動チャージ・クレジットの利用・設定変更は行いません。応答はメモリで検証し、使用率だけを同じ週の表示へ反映します。
 
 ## ユーザーが開始するログイン
 

@@ -146,9 +146,12 @@ internal static class UiTests
                 Assert(Pump(()=>refresh.Enabled)&&notices.Count==1&&warningRow.AccessibleDescription.Contains("上限"),"Mute suppresses delivery while preserving visible warnings");
                 timer.Stop();
                 var crowded=WidgetCards.Sample(DateTimeOffset.Now);foreach(var value in crowded){value.Source="オンライン";foreach(var window in value.Windows)window.Percent=100;}
-                typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(popup,2f);popup.SetUsage(crowded);
+                // Anchor to one monitor before resizing; cursor placement near another screen changes DPI.
+                var crowdedArea=Screen.PrimaryScreen.WorkingArea;popup.Location=crowdedArea.Location;
+                float crowdedScale=Math.Max(2f,crowdedArea.Height/400f);
+                typeof(PopupForm).GetField("scale",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(popup,crowdedScale);popup.SetUsage(crowded);
                 var content=Field<Panel>(popup,"content");
-                Assert(popup.Height<=Screen.FromControl(popup).WorkingArea.Height&&content.AutoScrollMinSize.Height>content.ClientSize.Height,"Many warnings at high DPI stay within the monitor with scrolling");
+                Assert(popup.Height<=crowdedArea.Height&&content.AutoScrollMinSize.Height>content.ClientSize.Height,"Many warnings at high DPI stay within the monitor with scrolling (popup="+popup.Height+", content="+content.ClientSize.Height+", total="+content.AutoScrollMinSize.Height+", scale="+crowdedScale+")");
                 var keyHandler=typeof(PopupForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic);
                 Func<Keys,bool> key=keys=>(bool)keyHandler.Invoke(popup,new object[]{new Message(),keys});
                 Assert(key(Keys.End)&&Field<UsageRow[]>(popup,"rows").Last().Bottom<=content.ClientSize.Height,"End key makes the last warning reachable without a mouse");

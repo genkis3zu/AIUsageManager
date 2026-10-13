@@ -13,6 +13,39 @@ internal static partial class Tests
     { return alerts.Observe(new[]{value},now,mode); }
     static void RunAlertTests()
     {
+        Check("Forecast explains current percentage, observed pace and 90 percent ETA",()=> {
+            var a=new UsageAlerts();var reset=T.AddDays(7);
+            Observe(a,Observed(20,T,reset),T);Observe(a,Observed(23,T.AddMinutes(5),reset),T.AddMinutes(5));
+            var value=Observed(26,T.AddMinutes(10),reset);Observe(a,value,T.AddMinutes(10));
+            var alert=value.Windows[0].Alert;
+            Assert(alert!=null && alert.Title.Contains("26%") && alert.Title.Contains("90%") && alert.Detail.Contains("直近10分") && alert.Detail.Contains("ポイント") && alert.Detail.Contains("95%"));
+        });
+        Check("Slow weekly pace is available without a limit warning",()=> {
+            var a=new UsageAlerts();var reset=T.AddDays(2);
+            Observe(a,Observed(35.75,T,reset),T);Observe(a,Observed(35.8,T.AddMinutes(15),reset),T.AddMinutes(15));
+            var value=Observed(36,T.AddMinutes(30),reset);Observe(a,value,T.AddMinutes(30));
+            var shown=UsageAlerts.ForDisplay(value,T.AddMinutes(30));
+            Assert(shown.Length==1 && shown[0].Detail.Contains("現在36%") && shown[0].Detail.Contains("12ポイント/日") && shown[0].Detail.Contains("4.5日") && shown[0].Detail.Contains("リセットが先"));
+        });
+        Check("Pace milestones handle reached levels, zero growth and missing reset",()=> {
+            var reached=UsagePace.Calculate(new UsageWindow("週",96,T.AddDays(7)),3,30,1,T);
+            Assert(reached.At90==null && reached.At95==null && reached.At100==T.AddHours(2) && reached.Summary.Contains("100%まで") && reached.Detail.Contains("95%：到達済み"));
+            var steady=UsagePace.Calculate(new UsageWindow("週",0,T.AddDays(7)),3,30,0,T);
+            Assert(steady.PointsPerHour==0 && steady.At90==null && steady.Summary.Contains("増加なし"));
+            var unknown=UsagePace.Calculate(new UsageWindow("5時間",20,null),3,10,2,T);
+            Assert(unknown.Summary.Contains("pt/時") && unknown.Detail.Contains("リセット時刻は未取得"));
+            Assert(UsagePace.Calculate(new UsageWindow("週",20,null),2,10,2,T)==null);
+        });
+        Check("Pace is preserved on identical reads but cleared on failure or a new period",()=> {
+            var a=new UsageAlerts();var reset=T.AddDays(7);
+            Observe(a,Observed(20,T,reset),T);Observe(a,Observed(21,T.AddMinutes(5),reset),T.AddMinutes(5));
+            var value=Observed(22,T.AddMinutes(10),reset);Observe(a,value,T.AddMinutes(10));
+            Assert(value.Windows[0].Pace!=null);
+            var repeated=Observed(22,T.AddMinutes(10),reset);Observe(a,repeated,T.AddMinutes(11));Assert(repeated.Windows[0].Pace!=null);
+            var failed=Observed(22,T.AddMinutes(10),reset);failed.Status="接続できません";Observe(a,failed,T.AddMinutes(11));
+            var resumed=Observed(22,T.AddMinutes(10),reset);Observe(a,resumed,T.AddMinutes(12));Assert(resumed.Windows[0].Pace==null);
+            var next=Observed(22,T.AddMinutes(15),reset.AddDays(7));Observe(a,next,T.AddMinutes(15));Assert(next.Windows[0].Pace==null);
+        });
         Check("Alert thresholds notify once per level and period",()=> {
             var a=new UsageAlerts();var reset=T.AddDays(1);
             Assert(Observe(a,Observed(89,T,reset),T,NotificationMode.Thresholds).Length==0);
@@ -60,7 +93,7 @@ internal static partial class Tests
             var a=new UsageAlerts();Observe(a,Observed(20,T,T.AddHours(3)),T);
             var second=Observed(23,T.AddMinutes(5),T.AddHours(3));Observe(a,second,T.AddMinutes(5));Assert(second.Windows[0].Alert==null);
             var value=Observed(26,T.AddMinutes(10),T.AddHours(3));var notices=Observe(a,value,T.AddMinutes(10));
-            Assert(notices.Length==1 && value.Windows[0].Alert.Forecast && value.Windows[0].Alert.Title.Contains("見込み") && value.Windows[0].Alert.Detail.Contains("推定"));
+            Assert(notices.Length==1 && value.Windows[0].Alert.Forecast && value.Windows[0].Alert.Title.Contains("90%") && value.Windows[0].Alert.Detail.Contains("推定"));
             Assert(Math.Abs((value.Windows[0].Alert.ForecastAt.Value-T).TotalMinutes-133.3333)<0.01);
         });
         Check("Steady usage and reset before predicted exhaustion do not forecast",()=> {
