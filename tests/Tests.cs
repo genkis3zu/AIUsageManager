@@ -46,6 +46,14 @@ internal static partial class Tests
             var r=UsageParser.Grok("{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"subscriptionTier\":\"SuperGrok Heavy\",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"USAGE_PERIOD_TYPE_WEEKLY\",\"end\":\"2026-10-13T09:01:54.789425+00:00\"}}}}", null,"CLI 記録");
             Assert(r.Windows[0].Percent==42 && r.RecordedAt==T && r.Plan=="SuperGrok Heavy" && r.Windows[0].ResetsAt.HasValue);
         });
+        Check("Grok recognizes current and legacy plan names without inventing migrations", () => {
+            foreach(var plan in new[]{"Free","Plus","Premium","Super","Ultra","SuperGrok","SuperGrok Plus","SuperGrok Heavy","SuperGrok Lite","Premium+"}) {
+                var value=UsageParser.Grok("{\"subscriptionTier\":\" "+plan.ToLowerInvariant()+" \"}",T,"API");
+                Assert(value.Plan==plan);
+            }
+            foreach(var plan in new[]{"unrecognized-private-value","Ultra\\nprivate-value","Max","ultra@example.test"})
+                Assert(UsageParser.Grok("{\"subscriptionTier\":\""+plan+"\"}",T,"API").Plan=="プラン未取得");
+        });
         Check("Grok billing explicit zero", () => Assert(UsageParser.Grok("{\"config\":{\"creditUsagePercent\":0,\"currentPeriod\":{\"periodType\":\"weekly\"}}}", T,"API").Windows[0].Percent==0));
         Check("Grok absent percentage is not zero", () => Assert(!UsageParser.Grok("{\"config\":{\"currentPeriod\":{\"type\":\"weekly\",\"end\":\"2026-10-13T09:00:00Z\"}}}", T,"API").HasData));
         Check("Grok successful period-only response distinguishes unreported usage from login failure", () => {
