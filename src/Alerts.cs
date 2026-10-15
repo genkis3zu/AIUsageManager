@@ -32,6 +32,12 @@ namespace AIUsageManager
             public readonly List<Sample> Samples = new List<Sample>();
         }
         readonly Dictionary<string, WindowState> states = new Dictionary<string, WindowState>();
+        readonly UsageForecaster forecaster;
+        public UsageAlerts() : this(new UsageForecaster()) { }
+        public UsageAlerts(UsageForecaster learning) {forecaster=learning;}
+        public bool SaveHistory(DateTimeOffset now) {return forecaster.Save(now);}
+        public bool ClearHistory() {states.Clear();return forecaster.Clear();}
+        public string LearningStatus {get{return forecaster.Status;}}
 
         static bool Fresh(ServiceUsage service, UsageWindow window, DateTimeOffset now)
         {
@@ -96,11 +102,12 @@ namespace AIUsageManager
                 double minutes=recent==null?0:(at-recent.At).TotalMinutes;
                 bool rapid=rise>=10&&percent<100;
                 DateTimeOffset? forecast=null;
-                var first=state.Samples[0];double span=(at-first.At).TotalMinutes,delta=percent-first.Percent;
-                window.Pace=UsagePace.Calculate(window,state.Samples.Count,span,delta,at);
-                if(percent<100&&window.ResetsAt.HasValue&&state.Samples.Count>=3&&span>=10&&delta>=2) {
-                    var predicted=at.AddMinutes((100-percent)*span/delta);
-                    if(predicted>now&&predicted<window.ResetsAt.Value)forecast=predicted;
+                window.Pace=forecaster.Observe(service,window,now);
+                if(percent<100&&window.ResetsAt.HasValue&&window.Pace!=null&&window.Pace.CanNotify&&window.Pace.LowerRate>0) {
+                    double hours=(100-percent)/window.Pace.LowerRate;
+                    if(hours>0&&hours<(window.ResetsAt.Value-at).TotalHours) {
+                        var predicted=at.AddHours(hours);if(predicted>now)forecast=predicted;
+                    }
                 }
                 int level=Level(percent),trends=(rapid?1:0)|(forecast.HasValue?2:0);
                 window.Alert=Describe(window,level,rapid,forecast,at,rise,minutes);

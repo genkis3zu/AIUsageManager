@@ -44,7 +44,7 @@ function presentService(s,connected,now=Date.now()) {
   const ranked=windows.filter(w=>w.alert||w.pace).sort((a,b)=>((b.alert?.threshold||0)-(a.alert?.threshold||0))||Number(!!b.alert)-Number(!!a.alert)||Number(b.label==='週')-Number(a.label==='週'));
   const focus=ranked[0];
   let state=focus?(focus.pace && !(focus.alert?.threshold>=100)?`${s.windows.length>1?focus.label+'：':''}${focus.pace.summary}${focus.alert?.rapidIncrease?' · 急増':''}`:focus.alert?.title||''):'';
-  if(!state)state=!connected?'アプリ未接続':s.status || (age>900000?'保存された値':age< -60000?'取得時刻を確認':s.windows.every(w=>w.percent===null)?'未取得':windows.some(w=>w.reset==='期限経過')?'期限経過・再取得待ち':fresh&&windows.some(w=>w.active)?'予測の観測中（3回・10分以上）':s.source || '未取得');
+  if(!state)state=!connected?'アプリ未接続':s.status || (age>900000?'保存された値':age< -60000?'取得時刻を確認':s.windows.every(w=>w.percent===null)?'未取得':windows.some(w=>w.reset==='期限経過')?'期限経過・再取得待ち':fresh&&windows.some(w=>w.active)?'予測の学習中':s.source || '未取得');
   const tooltip=[`${s.name} · ${s.plan}`, ...windows.map(w=>`${w.label} ${w.display} / リセット ${w.reset}${w.alert?'\n'+w.alert.title+'\n'+w.alert.detail:w.pace?'\n'+w.pace.detail:''}`),`取得 ${s.recordedAt?new Date(s.recordedAt).toLocaleString():'時刻不明'} · ${s.source}`,state].join('\n');
   return {name:s.name,windows,severity,state,tooltip,stamp:s.recordedAt?stamp(s.recordedAt):'未取得'};
 }

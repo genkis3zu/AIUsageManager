@@ -59,5 +59,5 @@ test('pace summary and observation basis remain visible without a warning',()=> 
 
 test('fresh readings without enough history explain collection rather than inventing an ETA',()=> {
   const v=presentService(parseSnapshot(JSON.stringify(payload())).services[1],true,now);
-  assert.match(v.state,/観測中/);assert.match(v.state,/10分/);assert.doesNotMatch(v.state,/90%まで約/);
+  assert.match(v.state,/学習中/);assert.doesNotMatch(v.state,/90%まで約/);
 });
