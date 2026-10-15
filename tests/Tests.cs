@@ -73,6 +73,7 @@ internal static partial class Tests
         RunGrokWebTests();
         RunWidgetTests();
         RunAlertTests();
+        RunForecastTests();
         RunSnapshotTests();
         Console.WriteLine(string.Format("RESULT {0} passed, {1} failed", passed, failed));
         return failed==0 ? 0 : 1;

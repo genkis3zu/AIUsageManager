@@ -13,28 +13,32 @@ internal static partial class Tests
     { return alerts.Observe(new[]{value},now,mode); }
     static void RunAlertTests()
     {
-        Check("Forecast explains current percentage, observed pace and 90 percent ETA",()=> {
+        Check("Short weekly burst is learning rather than a confident multi-day forecast",()=> {
             var a=new UsageAlerts();var reset=T.AddDays(7);
             Observe(a,Observed(20,T,reset),T);Observe(a,Observed(23,T.AddMinutes(5),reset),T.AddMinutes(5));
-            var value=Observed(26,T.AddMinutes(10),reset);Observe(a,value,T.AddMinutes(10));
-            var alert=value.Windows[0].Alert;
-            Assert(alert!=null && alert.Title.Contains("26%") && alert.Title.Contains("90%") && alert.Detail.Contains("直近10分") && alert.Detail.Contains("ポイント") && alert.Detail.Contains("95%"));
+            var value=Observed(26,T.AddMinutes(10),reset);var notices=Observe(a,value,T.AddMinutes(10));
+            Assert(notices.Length==0 && value.Windows[0].Pace!=null && value.Windows[0].Pace.Summary.Contains("学習中") && value.Windows[0].Pace.At90==null && value.Windows[0].Alert==null);
+        });
+        Check("Adaptive pace explains current percentage and milestone uncertainty",()=> {
+            var points=Routine(T.AddDays(-5),120,t=>0.4);var a=new UsageAlerts(new UsageForecaster(History(points)));
+            var value=Observed(48.4,T.AddHours(1),T.AddDays(2));Observe(a,value,T.AddHours(1));
+            var pace=value.Windows[0].Pace;
+            Assert(pace!=null && pace.Detail.Contains("現在48.4%") && pace.Summary.Contains("90%") && pace.Detail.Contains("平均誤差") && pace.Detail.Contains("ポイント") && pace.Detail.Contains("95%"));
         });
         Check("Slow weekly pace is available without a limit warning",()=> {
             var a=new UsageAlerts();var reset=T.AddDays(2);
             Observe(a,Observed(35.75,T,reset),T);Observe(a,Observed(35.8,T.AddMinutes(15),reset),T.AddMinutes(15));
             var value=Observed(36,T.AddMinutes(30),reset);Observe(a,value,T.AddMinutes(30));
             var shown=UsageAlerts.ForDisplay(value,T.AddMinutes(30));
-            Assert(shown.Length==1 && shown[0].Detail.Contains("現在36%") && shown[0].Detail.Contains("12ポイント/日") && shown[0].Detail.Contains("4.5日") && shown[0].Detail.Contains("リセットが先"));
+            Assert(shown.Length==1 && shown[0].Detail.Contains("現在36%") && shown[0].Informational && shown[0].Title.Contains("学習中") && value.Windows[0].Pace.At90==null);
         });
         Check("Pace milestones handle reached levels, zero growth and missing reset",()=> {
-            var reached=UsagePace.Calculate(new UsageWindow("週",96,T.AddDays(7)),3,30,1,T);
+            var reached=UsagePace.Adaptive(new UsageWindow("週",96,T.AddDays(7)),T,2,1,3,72,4,3,1,24,true,new[]{0.2,0.6,0.2},"");
             Assert(reached.At90==null && reached.At95==null && reached.At100==T.AddHours(2) && reached.Summary.Contains("100%まで") && reached.Detail.Contains("95%：到達済み"));
-            var steady=UsagePace.Calculate(new UsageWindow("週",0,T.AddDays(7)),3,30,0,T);
-            Assert(steady.PointsPerHour==0 && steady.At90==null && steady.Summary.Contains("増加なし"));
-            var unknown=UsagePace.Calculate(new UsageWindow("5時間",20,null),3,10,2,T);
-            Assert(unknown.Summary.Contains("pt/時") && unknown.Detail.Contains("リセット時刻は未取得"));
-            Assert(UsagePace.Calculate(new UsageWindow("週",20,null),2,10,2,T)==null);
+            var steady=Forecast(Routine(T.AddDays(-5),120,t=>0));
+            Assert(steady.PointsPerHour==0 && steady.At90==null && steady.Summary.Contains("時期未確定")&&!steady.CanNotify);
+            var value=Observed(20,T,null);var unknown=new UsageForecaster().Observe(value,value.Windows[0],T);
+            Assert(unknown.IsLearning && unknown.At90==null && unknown.Detail.Contains("リセット時刻"));
         });
         Check("Pace is preserved on identical reads but cleared on failure or a new period",()=> {
             var a=new UsageAlerts();var reset=T.AddDays(7);
@@ -44,7 +48,7 @@ internal static partial class Tests
             var repeated=Observed(22,T.AddMinutes(10),reset);Observe(a,repeated,T.AddMinutes(11));Assert(repeated.Windows[0].Pace!=null);
             var failed=Observed(22,T.AddMinutes(10),reset);failed.Status="接続できません";Observe(a,failed,T.AddMinutes(11));
             var resumed=Observed(22,T.AddMinutes(10),reset);Observe(a,resumed,T.AddMinutes(12));Assert(resumed.Windows[0].Pace==null);
-            var next=Observed(22,T.AddMinutes(15),reset.AddDays(7));Observe(a,next,T.AddMinutes(15));Assert(next.Windows[0].Pace==null);
+            var next=Observed(22,T.AddMinutes(15),reset.AddDays(7));Observe(a,next,T.AddMinutes(15));Assert(next.Windows[0].Pace.IsLearning && next.Windows[0].Pace.At90==null);
         });
         Check("Alert thresholds notify once per level and period",()=> {
             var a=new UsageAlerts();var reset=T.AddDays(1);
@@ -89,12 +93,11 @@ internal static partial class Tests
             var value=Observed(32,T.AddMinutes(5),T.AddDays(1));var notices=Observe(a,value,T.AddMinutes(5));
             Assert(notices.Length==1 && value.Windows[0].Alert.RapidIncrease && value.Windows[0].Alert.Detail.Contains("12"));
         });
-        Check("Forecast requires three samples over ten minutes and is explicitly an estimate",()=> {
+        Check("Early observations cannot trigger a long-range forecast notification",()=> {
             var a=new UsageAlerts();Observe(a,Observed(20,T,T.AddHours(3)),T);
             var second=Observed(23,T.AddMinutes(5),T.AddHours(3));Observe(a,second,T.AddMinutes(5));Assert(second.Windows[0].Alert==null);
             var value=Observed(26,T.AddMinutes(10),T.AddHours(3));var notices=Observe(a,value,T.AddMinutes(10));
-            Assert(notices.Length==1 && value.Windows[0].Alert.Forecast && value.Windows[0].Alert.Title.Contains("90%") && value.Windows[0].Alert.Detail.Contains("推定"));
-            Assert(Math.Abs((value.Windows[0].Alert.ForecastAt.Value-T).TotalMinutes-133.3333)<0.01);
+            Assert(notices.Length==0 && value.Windows[0].Alert==null && value.Windows[0].Pace.IsLearning);
         });
         Check("Steady usage and reset before predicted exhaustion do not forecast",()=> {
             foreach(bool steady in new[]{false,true}) {

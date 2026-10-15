@@ -69,6 +69,10 @@ internal static class UiTests
     static int Main()
     {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+        // DoEvents is not a persistent Application.Run loop. Keep a UI context installed
+        // so worker continuations return to this test's UI thread, including while hidden.
+        WindowsFormsSynchronizationContext.AutoInstall=false;
+        SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         TrayContext context=null;
         try
         {
@@ -92,8 +96,16 @@ internal static class UiTests
                 Assert(dark.Checked&&popup.BackColor==darkPalette.Surface,"Startup restores selected dark appearance");
                 Assert(timer.Interval==300000,"Default refresh is five minutes");
                 Assert(Pump(()=>source.Calls==1),"Startup refresh runs on the message loop");
+                var learning=Field<ToolStripMenuItem>(context,"learningMenu");
+                Assert(!learning.Enabled&&!context.ClearLearningHistory(()=>true),"History deletion cannot overlap an active fetch");
                 refresh.PerformClick();Application.DoEvents();Assert(source.Calls==1&&!refresh.Enabled,"Refresh overlap blocked while loading");
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Background completion enables refresh");
+                Assert(learning.Enabled&&learning.DropDownItems.Count==2,"Learning status and deletion are available after refresh");
+                Assert(context.ClearLearningHistory(()=> {
+                    var task=(Task)typeof(TrayContext).GetMethod("RefreshUsage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(context,null);
+                    Application.DoEvents();
+                    return task.IsCompleted&&source.Calls==1;
+                }),"Refresh during modal deletion confirmation is blocked and deletion succeeds");
                 Assert(popup.Controls.Cast<Control>().All(c=>c.BackColor==darkPalette.Surface),"Data refresh retains dark rows and buttons");
                 CaptureMenu(menu,themes);
                 light.PerformClick();
@@ -118,8 +130,12 @@ internal static class UiTests
                 typeof(PopupForm).GetMethod("OnFormClosing",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(popup,new object[]{shutdown});
                 Assert(!shutdown.Cancel,"Popup never vetoes Windows shutdown");
                 timer.Interval=35;
-                Assert(Pump(()=>source.Calls==3),"Real timer tick triggers background refresh");
+                bool timerFired=Pump(()=>source.Calls==3);
+                Assert(timerFired,"Real timer tick triggers background refresh (calls="+source.Calls+", timer="+timer.Enabled+", refreshing="+Field<bool>(context,"refreshing")+", clearing="+Field<bool>(context,"clearingHistory")+")");
                 Application.DoEvents();Assert(source.Calls==3&&!timer.Enabled,"Timer pauses while request pending");
+                // Only this check uses the accelerated timer. A 35 ms restart during later
+                // asynchronous completions would request unrelated fake responses on slower CI.
+                timer.Interval=300000;
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Timer refresh completes");
                 timer.Stop();popup.OpenAt(new Point(300,500));
                 row.Usage=authMissing;

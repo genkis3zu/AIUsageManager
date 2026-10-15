@@ -14,6 +14,8 @@
 **/.credentials.json
 **/auth.json
 **/usage-cache.json
+**/forecast-history.dat
+**/forecast-history.dat.tmp
 *.jsonl
 *.log
 *.pfx

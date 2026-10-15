@@ -45,4 +45,10 @@
 
 ## 警告への利用
 
-取得元・成功状態・元の取得時刻・リセット日時を確認し、新しいオンライン値だけを警告判定に使います。ログへのフォールバックや取得失敗を0%とみなしたり、急増の起点にしたりしません。予測用の観測はメモリ上だけに保持します。判定・通知条件は [使用量の警告](alerts.md) に記載しています。
+取得元・成功状態・元の取得時刻・リセット日時を確認し、新しいオンライン値だけを警告判定に使います。ログへのフォールバックや取得失敗を0%とみなしたり、急増の起点にしたりしません。予測用の観測はこのPCに暗号化して最大90日保持します。判定・通知条件は [使用量の警告](alerts.md) に記載しています。
+
+## 外部の統計との関係
+
+2026-10-15時点で確認した公開資料では、[AnthropicのUsage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api)はAPI組織用で個人アカウントには提供されず、[OpenAIのUsage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage)も組織のAPI使用量を扱います。[xAIの履歴API](https://docs.x.ai/developers/rest-api-reference/management/billing)もAPI使用量の履歴で、[The X Subscriptionの使用量](https://docs.x.ai/x-subscription/manage)はダッシュボードで確認する案内です。
+
+このアプリで表示している個人サブスクの上限率と対応付けられる履歴取得方法は、上記資料では確認できていません。APIのトークン数や費用をサブスクの上限率に換算せず、現在の取得先が返した使用率を継続記録して学習します。追加の管理者キーを求めたり、未確認の取得先へ既存ログインを送信したりはしません。

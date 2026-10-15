@@ -41,11 +41,13 @@ internal static class Diagnostics
             if(args.Contains("--forecast")) {
                 var alerts=new UsageAlerts();codex.Source="オンライン";
                 values[2]=ServiceUsage.Empty("Grok","再ログインが必要です");values[2].NeedsLogin=true;
-                for(int i=0;i<3;i++) {
-                    claude.RecordedAt=codex.RecordedAt=now.AddMinutes(-30+15*i);
-                    claude.Windows[0].Percent=14;claude.Windows[1].Percent=35.75+0.125*i;claude.Windows[1].ResetsAt=now.AddDays(6);
-                    codex.Windows[0].Percent=21.6+0.2*i;codex.Windows[0].ResetsAt=now.AddDays(5);
-                    alerts.Observe(values,now.AddMinutes(-30+15*i),NotificationMode.Off);
+                var start=now.AddHours(-324);
+                for(int i=0;i<=324;i++) {
+                    claude.RecordedAt=codex.RecordedAt=start.AddHours(i);
+                    claude.Windows[0].Percent=(i%5)*6;claude.Windows[0].ResetsAt=start.AddHours((i/5+1)*5);
+                    claude.Windows[1].Percent=(i%168)*0.3;claude.Windows[1].ResetsAt=start.AddDays((i/168+1)*7);
+                    codex.Windows[0].Percent=(i%168)*0.5;codex.Windows[0].ResetsAt=claude.Windows[1].ResetsAt;
+                    alerts.Observe(values,start.AddHours(i),NotificationMode.Off);
                 }
                 File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"forecast-sample.json"),UsageSnapshot.Create(values,now,false));
             }

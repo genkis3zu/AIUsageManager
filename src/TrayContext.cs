@@ -28,7 +28,8 @@ namespace AIUsageManager
         readonly ILoginLauncher loginLauncher;
         readonly ToolStripMenuItem loginMenu = new ToolStripMenuItem("ログイン");
         readonly ToolStripMenuItem notificationMenu = new ToolStripMenuItem("通知");
-        readonly UsageAlerts alerts = new UsageAlerts();
+        readonly UsageAlerts alerts;
+        readonly ToolStripMenuItem learningMenu = new ToolStripMenuItem("予測の学習");
         readonly Action<string> notify;
         readonly SnapshotServer snapshots;
         readonly RegisteredWaitHandle refreshWait;
@@ -36,7 +37,7 @@ namespace AIUsageManager
         readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[2];
         ThemeMode themeMode;
         NotificationMode notificationMode;
-        bool refreshing, exiting, loggingIn;
+        bool refreshing, exiting, loggingIn, clearingHistory;
         DateTimeOffset? nextRefresh;
         public TrayContext(bool show, EventWaitHandle signal) : this(show, signal, null) { }
         public TrayContext(bool show, EventWaitHandle signal, IUsageSource source) : this(show, signal, source, ThemeSettings.Default()) { }
@@ -49,6 +50,7 @@ namespace AIUsageManager
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal)
         {
             snapshots=snapshotServer;
+            alerts=new UsageAlerts(source==null?UsageForecaster.Default():new UsageForecaster());
             loginLauncher=launcher;
             settings=themeSettings;themeMode=settings.Load();notificationMode=settings.LoadNotifications();
             service = source ?? new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), http);
@@ -70,6 +72,11 @@ namespace AIUsageManager
             AddNotificationChoice("90%・95%・100%のみ",NotificationMode.Thresholds);
             AddNotificationChoice("通知しない（画面には表示）",NotificationMode.Off);
             menu.Items.Add(notificationMenu);
+            learningMenu.DropDownItems.Add("学習の状態",null,(s,e)=>MessageBox.Show(alerts.LearningStatus,"予測の学習",MessageBoxButtons.OK,MessageBoxIcon.Information));
+            learningMenu.DropDownItems.Add("学習履歴を削除",null,(s,e)=> {
+                ClearLearningHistory(()=>MessageBox.Show("このアプリに保存した使用量の学習履歴を削除し、新しく学習します。各サービスのログやログイン情報は変更しません。","学習履歴を削除",MessageBoxButtons.YesNo,MessageBoxIcon.Question)==DialogResult.Yes);
+            });
+            menu.Items.Add(learningMenu);
             widgetMenu.DropDownItems.Add("ウィジェットを開く",null,(s,e)=>OpenWidgetLink("ms-widgets:"));
             widgetMenu.DropDownItems.Add("追加・削除の手順",null,(s,e)=>MessageBox.Show(
                 "登録済み: Win+W → ＋ → AI Usage Manager を追加します。\n右上の … から中／大サイズを選べます。\n\n未登録: ウィジェット用ZIPを展開し、install-widgets.ps1 をWindows PowerShellで実行します。\n削除: 同梱の uninstall-widgets.ps1 を実行します。\n\n必要: Windows 11 x64、Windows App Runtime 2.5.1 x64以降、開発者モード。\n詳しくはウィジェット用ZIPのREADME.mdを参照してください。",
@@ -137,6 +144,7 @@ namespace AIUsageManager
             widgetMenu.DropDown.Renderer=renderer;widgetMenu.DropDown.BackColor=palette.Surface;widgetMenu.DropDown.ForeColor=palette.Ink;
             loginMenu.DropDown.Renderer=renderer;loginMenu.DropDown.BackColor=palette.Surface;loginMenu.DropDown.ForeColor=palette.Ink;
             notificationMenu.DropDown.Renderer=renderer;notificationMenu.DropDown.BackColor=palette.Surface;notificationMenu.DropDown.ForeColor=palette.Ink;
+            learningMenu.DropDown.Renderer=renderer;learningMenu.DropDown.BackColor=palette.Surface;learningMenu.DropDown.ForeColor=palette.Ink;
             foreach(ToolStripMenuItem item in themeMenu.DropDownItems)item.Checked=(ThemeMode)item.Tag==themeMode;
             foreach(ToolStripMenuItem item in notificationMenu.DropDownItems)item.Checked=(NotificationMode)item.Tag==notificationMode;
             menu.Invalidate(true);themeMenu.DropDown.Invalidate(true);
@@ -147,6 +155,20 @@ namespace AIUsageManager
             try { if(!exiting)popup.BeginInvoke(new Action(ApplyTheme)); }catch(InvalidOperationException) { }
         }
         void ShowPopup() { if(!exiting){ApplyTheme();popup.OpenAt(Cursor.Position);} }
+        internal bool ClearLearningHistory(Func<bool> confirm)
+        {
+            if(refreshing||exiting||clearingHistory)return false;
+            // A modal confirmation pumps UI messages, including timer and remote refresh events.
+            clearingHistory=true;
+            try {
+                if(!confirm()||exiting)return false;
+                bool cleared=alerts.ClearHistory();
+                foreach(var value in latest)foreach(var window in value.Windows){window.Pace=null;window.Alert=null;}
+                popup.SetUsage(latest);PublishSnapshot();
+                if(!cleared)MessageBox.Show("保存履歴を削除できませんでした。学習の状態を確認してください。","予測の学習",MessageBoxButtons.OK,MessageBoxIcon.Warning);
+                return cleared;
+            } finally {clearingHistory=false;}
+        }
         async Task Login(string name)
         {
             if(loggingIn||exiting)return;
@@ -162,14 +184,19 @@ namespace AIUsageManager
         }
         async Task RefreshUsage()
         {
-            if(refreshing||exiting)return;
-            refreshing=true;refreshTimer.Stop();popup.SetRefresh(true,nextRefresh);menu.Items[1].Enabled=false;
+            if(refreshing||exiting||clearingHistory)return;
+            refreshing=true;refreshTimer.Stop();popup.SetRefresh(true,nextRefresh);menu.Items[1].Enabled=false;learningMenu.Enabled=false;
             PublishSnapshot();
             try
             {
                 var result=await service.FetchAllAsync(cancellation.Token);
                 if(exiting)return;
-                var notices=alerts.Observe(result,DateTimeOffset.Now,notificationMode);
+                var mode=notificationMode;
+                var notices=await Task.Run(()=> {
+                    var observed=alerts.Observe(result,DateTimeOffset.Now,mode);
+                    alerts.SaveHistory(DateTimeOffset.Now);return observed;
+                });
+                if(exiting)return;
                 latest=result;
                 popup.SetUsage(result);
                 string summary=string.Join(" | ",result.Select(r=>r.Name+" "+string.Join("/",r.Windows.Select(w=>UsageText.Percent(w.Percent)))));
@@ -186,7 +213,7 @@ namespace AIUsageManager
             {
                 refreshing=false;
                 if(!exiting)PublishSnapshot();
-                if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;refreshTimer.Start();}
+                if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;learningMenu.Enabled=true;refreshTimer.Start();}
             }
         }
         void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing)); }
