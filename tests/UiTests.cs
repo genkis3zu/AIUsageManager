@@ -133,6 +133,9 @@ internal static class UiTests
                 bool timerFired=Pump(()=>source.Calls==3);
                 Assert(timerFired,"Real timer tick triggers background refresh (calls="+source.Calls+", timer="+timer.Enabled+", refreshing="+Field<bool>(context,"refreshing")+", clearing="+Field<bool>(context,"clearingHistory")+")");
                 Application.DoEvents();Assert(source.Calls==3&&!timer.Enabled,"Timer pauses while request pending");
+                // Only this check uses the accelerated timer. A 35 ms restart during later
+                // asynchronous completions would request unrelated fake responses on slower CI.
+                timer.Interval=300000;
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Timer refresh completes");
                 timer.Stop();popup.OpenAt(new Point(300,500));
                 row.Usage=authMissing;
