@@ -232,7 +232,8 @@ namespace AIUsageManager
                 var time = Json.Date(Json.Get(data, "timestamp") ?? Json.Get(data, "fetched_at") ?? Json.Get(data, "updated_at"));
                 var result = UsageParser.Claude(cache, plan, time, "既存キャッシュ");
                 result.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier"));
-                if (result.HasData) { result.Status = "オンライン未取得・保存値を表示"; result.NeedsLogin = login; return result; }
+                // When login is needed, say why next to the login button instead of a generic message.
+                if (result.HasData) { result.Status = login ? error + "・保存値を表示" : "オンライン未取得・保存値を表示"; result.NeedsLogin = login; return result; }
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }

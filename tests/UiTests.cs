@@ -193,6 +193,25 @@ internal static class UiTests
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Signaled refresh completes normally");
                 context.ExitThread();Assert(popup.IsDisposed,"Exit releases popup and tray resources");context=null;
             }
+            // Login requests from --login-<service> (Stream Deck, widget): before the app starts and while it runs.
+            using(var showEvent=new EventWaitHandle(false,EventResetMode.AutoReset))
+            using(var claudeEvent=new EventWaitHandle(false,EventResetMode.AutoReset))
+            using(var codexEvent=new EventWaitHandle(false,EventResetMode.AutoReset))
+            using(var grokEvent=new EventWaitHandle(false,EventResetMode.AutoReset))
+            {
+                string loginFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(loginFixture);
+                var loginSource=new FakeSource();var requested=new FakeLogin();
+                claudeEvent.Set();
+                context=new TrayContext(false,showEvent,loginSource,new ThemeSettings(Path.Combine(loginFixture,"settings.ini")),requested,new[]{claudeEvent,codexEvent,grokEvent},text=>{},null,null);
+                Assert(Pump(()=>loginSource.Calls==1),"Tray started for a login still runs its first refresh");
+                loginSource.Complete();
+                Assert(Pump(()=>requested.Calls==1)&&requested.Service=="Claude","A login requested before the tray app starts runs for Claude once it is ready");
+                requested.Pending.SetResult(null);Assert(Pump(()=>loginSource.Calls==2),"Finished login refreshes usage");
+                loginSource.Complete();Assert(Pump(()=>!Field<bool>(context,"loggingIn")),"Login state is released after the refresh");
+                codexEvent.Set();
+                Assert(Pump(()=>requested.Calls==2)&&requested.Service=="Codex","A login requested while the tray app runs goes to the requested service");
+                context.ExitThread();context=null;
+            }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;
         }
         catch(Exception e){Console.WriteLine("FAIL UI check: "+e.Message);return 1;}

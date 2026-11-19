@@ -91,7 +91,7 @@ internal static partial class Tests
         });
         Check("Claude 401 with a saved cache keeps cached values and still offers login", () => {
             var root=Fixture();Auth(root);File.WriteAllText(Path.Combine(root,".claude","usage-cache.json"),"{\"timestamp\":\"2026-10-10T09:00:00Z\",\"rate_limits\":{\"seven_day\":{\"used_percentage\":9}}}");
-            using(var http=new HttpClient(new FakeHttp{Status=HttpStatusCode.Unauthorized})) {var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(value.Windows[0].Percent==9 && value.NeedsLogin);}
+            using(var http=new HttpClient(new FakeHttp{Status=HttpStatusCode.Unauthorized})) {var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(value.Windows[0].Percent==9 && value.NeedsLogin && value.Status.Contains("再ログイン") && value.Status.Contains("保存値"));}
         });
         Check("Claude rate limits, refusals and server errors do not ask for login", () => {
             foreach(var status in new[]{(HttpStatusCode)429,HttpStatusCode.Forbidden,HttpStatusCode.InternalServerError}) {
