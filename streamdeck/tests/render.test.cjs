@@ -166,6 +166,8 @@ test('status key: the headline takes the tone colour and stays inside the key', 
   }
   const long = renderKey(statusOf({ ...AI.critical, title: 'Claude ' + '障害'.repeat(20), detail: 'claude.ai、Claude Code、Claude API (api.anthropic.com)' }), { palette: STATUS_PALETTE });
   assert.ok(long.includes('…') && !long.includes('障害'.repeat(20)) && !long.includes('api.anthropic.com)'));
+  const both = renderKey(statusOf({ ...AI.critical, title: 'OpenAI 障害', detail: 'Claude も一部不調（Claude Code）' }), { palette: STATUS_PALETTE });
+  assert.ok(both.includes('>Claude も一部不調<') && both.includes('>（Claude Code）<'), 'the second line starts at the bracket');
   const escaped = renderKey(statusOf({ ...AI.critical, title: '<b>& 障害', detail: '<i>' }), { palette: STATUS_PALETTE });
   assert.ok(escaped.includes('&lt;b&gt;&amp;') && escaped.includes('&lt;i&gt;') && !escaped.includes('<b>') && !escaped.includes('<i>'));
 });

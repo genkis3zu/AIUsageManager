@@ -154,13 +154,16 @@ namespace AIUsageManager
         public static StatusSummary Create(ProviderStatus[] providers, ResetNotice[] resets, DateTimeOffset now)
         {
             providers = providers ?? new ProviderStatus[0]; resets = resets ?? new ResetNotice[0];
-            var worst = providers.Where(p => p != null && p.Level >= StatusLevel.Minor).OrderByDescending(p => p.Level).FirstOrDefault();
-            if (worst != null)
+            // Every company with a problem is named: the worse one leads (Claude first on a tie) and sets the colour and page,
+            // so an outage at one company never hides a problem at the other.
+            var problems = providers.Where(p => p != null && p.Level >= StatusLevel.Minor).OrderByDescending(p => p.Level).ToArray();
+            if (problems.Length > 0)
             {
-                bool major = worst.Level == StatusLevel.Major;
-                string title = worst.Company + (major ? " 障害" : " 一部不調");
-                return new StatusSummary { Tone = major ? "critical" : "warning", Title = title, Detail = worst.Detail ?? "",
-                    Page = worst.Company == "OpenAI" ? OpenAIPage : ClaudePage, Line = title + (string.IsNullOrEmpty(worst.Detail) ? "" : "（" + worst.Detail + "）") };
+                var worst = problems[0]; var others = problems.Skip(1).ToArray();
+                return new StatusSummary { Tone = worst.Level == StatusLevel.Major ? "critical" : "warning", Title = worst.Company + " " + State(worst),
+                    Detail = others.Length == 0 ? worst.Detail ?? "" : string.Join("、", others.Select(p => p.Company + " も" + State(p) + InBrackets(p.Detail))),
+                    Page = worst.Company == "OpenAI" ? OpenAIPage : ClaudePage,
+                    Line = string.Join("・", problems.Select(p => p.Company + " " + State(p) + InBrackets(p.Detail))) };
             }
             var reset = resets.OrderByDescending(r => r.At).FirstOrDefault();
             if (reset != null)
@@ -172,5 +175,7 @@ namespace AIUsageManager
             return new StatusSummary { Tone = "normal", Title = "正常", Detail = unknown.Length > 0 ? missing + " は確認できません" : "",
                 Line = "AIの状況：正常" + (unknown.Length > 0 ? "（" + missing + " は確認できません）" : "") };
         }
+        static string State(ProviderStatus p) { return p.Level == StatusLevel.Major ? "障害" : "一部不調"; }
+        static string InBrackets(string detail) { return string.IsNullOrEmpty(detail) ? "" : "（" + detail + "）"; }
     }
 }

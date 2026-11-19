@@ -91,6 +91,14 @@ internal static partial class Tests
             var failed = Fresh("Codex", reset.AddMinutes(5), UsageWindow.Week(1, reset.AddDays(7)));failed.Status = "接続できません";
             Assert(tracker.Observe(new[] { cached }, reset.AddMinutes(5)).Length == 0 && tracker.Observe(new[] { failed }, reset.AddMinutes(5)).Length == 0);
         });
+        Check("When both companies have problems, both are named and the worse one leads", () => {
+            var claude = new ProviderStatus { Company = "Claude", Level = StatusLevel.Minor, Detail = "Claude Code" };
+            var openai = new ProviderStatus { Company = "OpenAI", Level = StatusLevel.Major, Detail = "" };
+            var a = StatusSummary.Create(new[] { claude, openai }, new ResetNotice[0], T);
+            Assert(a.Tone == "critical" && a.Title == "OpenAI 障害" && a.Page == "https://status.openai.com/" && a.Detail == "Claude も一部不調（Claude Code）" && a.Line == "OpenAI 障害・Claude 一部不調（Claude Code）");
+            var tie = StatusSummary.Create(new[] { claude, new ProviderStatus { Company = "OpenAI", Level = StatusLevel.Minor, Detail = "Codex" } }, new ResetNotice[0], T);
+            Assert(tie.Tone == "warning" && tie.Title == "Claude 一部不調" && tie.Page == "https://status.claude.com/" && tie.Detail == "OpenAI も一部不調（Codex）" && tie.Line == "Claude 一部不調（Claude Code）・OpenAI 一部不調（Codex）");
+        });
         Check("The summary shows outages first, then resets, then normal", () => {
             var major = new ProviderStatus { Company = "OpenAI", Level = StatusLevel.Major, Detail = "Codex in ChatGPT Desktop" };
             var minor = new ProviderStatus { Company = "Claude", Level = StatusLevel.Minor, Detail = "Claude Code" };
@@ -99,7 +107,9 @@ internal static partial class Tests
             var unknown = new ProviderStatus { Company = "OpenAI", Level = StatusLevel.Unknown, Detail = "" };
             var reset = new[] { new ResetNotice { Service = "Claude", Label = "週（Fable）", ShortLabel = "Fable", At = T } };
             var a = StatusSummary.Create(new[] { minor, major }, reset, T);
-            Assert(a.Tone == "critical" && a.Title == "OpenAI 障害" && a.Detail == "Codex in ChatGPT Desktop" && a.Page == "https://status.openai.com/" && a.Line == "OpenAI 障害（Codex in ChatGPT Desktop）");
+            Assert(a.Tone == "critical" && a.Title == "OpenAI 障害" && a.Detail == "Claude も一部不調（Claude Code）" && a.Page == "https://status.openai.com/" && a.Line == "OpenAI 障害（Codex in ChatGPT Desktop）・Claude 一部不調（Claude Code）");
+            var single = StatusSummary.Create(new[] { ok, major }, reset, T);
+            Assert(single.Detail == "Codex in ChatGPT Desktop" && single.Line == "OpenAI 障害（Codex in ChatGPT Desktop）");
             var b = StatusSummary.Create(new[] { minor, okOpenAI }, reset, T);
             Assert(b.Tone == "warning" && b.Title == "Claude 一部不調" && b.Page == "https://status.claude.com/");
             var c = StatusSummary.Create(new[] { ok, okOpenAI }, reset, T);

@@ -60,14 +60,14 @@ const fitWidth = (value, maxEm) => {
   for (const c of Array.from(value)) { if (widthEm(out + c) + 1 > maxEm) break; out += c; }
   return out + '…';
 };
-// At most two lines; the first ends after a space or 、 when there is one in its second half.
+// At most two lines; the first ends after a space or 、, or before （, when one falls in its second half.
 function wrap(value, maxEm) {
   if (widthEm(value) <= maxEm) return [value];
   const chars = Array.from(value);
   let cut = 0;
   while (cut < chars.length && widthEm(chars.slice(0, cut + 1).join('')) <= maxEm) cut++;
-  const soft = Math.max(chars.lastIndexOf(' ', cut - 1), chars.lastIndexOf('、', cut - 1));
-  const end = soft >= cut / 2 ? soft + 1 : cut;
+  const soft = Math.max(chars.lastIndexOf(' ', cut - 1) + 1, chars.lastIndexOf('、', cut - 1) + 1, chars.lastIndexOf('（', cut - 1));
+  const end = soft >= cut / 2 ? soft : cut;
   return [chars.slice(0, end).join('').trimEnd(), fitWidth(chars.slice(end).join('').trimStart(), maxEm)];
 }
 function statusBody(view, palette) {
