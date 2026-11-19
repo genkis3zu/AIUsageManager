@@ -60,7 +60,9 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量を表示します。
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-1.1.0-streamdeck.streamDeckPlugin` をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.1.1-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+
+   Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。
 
 ## 「AI Limits」プラグインを使っている場合
