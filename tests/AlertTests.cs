@@ -33,7 +33,7 @@ internal static partial class Tests
             Assert(shown.Length==1 && shown[0].Detail.Contains("現在36%") && shown[0].Informational && shown[0].Title.Contains("学習中") && value.Windows[0].Pace.At90==null);
         });
         Check("Pace milestones handle reached levels, zero growth and missing reset",()=> {
-            var reached=UsagePace.Adaptive(new UsageWindow("週",96,T.AddDays(7)),T,2,1,3,72,4,3,1,24,true,new[]{0.2,0.6,0.2},"");
+            var reached=UsagePace.Adaptive(UsageWindow.Week(96,T.AddDays(7)),T,2,1,3,72,4,3,1,24,true,new[]{0.2,0.6,0.2},"");
             Assert(reached.At90==null && reached.At95==null && reached.At100==T.AddHours(2) && reached.Summary.Contains("100%まで") && reached.Detail.Contains("95%：到達済み"));
             var steady=Forecast(Routine(T.AddDays(-5),120,t=>0));
             Assert(steady.PointsPerHour==0 && steady.At90==null && steady.Summary.Contains("時期未確定")&&!steady.CanNotify);
@@ -83,7 +83,7 @@ internal static partial class Tests
         });
         Check("Each Claude window has independent thresholds",()=> {
             var value=ServiceUsage.Empty("Claude","");value.Source="オンライン";value.RecordedAt=T;
-            value.Windows[0].Percent=95;value.Windows[0].ResetsAt=T.AddHours(3);value.Windows[1].Percent=100;value.Windows[1].ResetsAt=T.AddDays(1);
+            value.Windows.Clear();value.Windows.Add(UsageWindow.FiveHour(95,T.AddHours(3)));value.Windows.Add(UsageWindow.Week(100,T.AddDays(1)));
             var notices=new UsageAlerts().Observe(new[]{value},T,NotificationMode.All);
             Assert(notices.Length==2 && notices[0].Window=="5時間" && notices[1].Window=="週" && value.Windows[1].Alert.Title.Contains("上限"));
         });

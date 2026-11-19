@@ -2,18 +2,45 @@
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 
 namespace AIUsageManager
 {
+    public enum UsageSpan { FiveHour, Week }
+    // One usage limit as the service reports it: a 5-hour or weekly window, optionally limited to one model.
     public sealed class UsageWindow
     {
-        public string Label;
+        public const string UnnamedModel = "モデル別";
+        public readonly UsageSpan Span;
+        public readonly string Scope;
         public double? Percent;
         public DateTimeOffset? ResetsAt;
         public UsageAlert Alert;
         public UsagePace Pace;
-        public UsageWindow(string label, double? percent, DateTimeOffset? resetsAt)
-        { Label = label; Percent = percent; ResetsAt = resetsAt; }
+        UsageWindow(UsageSpan span, string scope, double? percent, DateTimeOffset? resetsAt)
+        { Span = span; Scope = scope; Percent = percent; ResetsAt = resetsAt; }
+        public static UsageWindow FiveHour(double? percent, DateTimeOffset? resetsAt) { return new UsageWindow(UsageSpan.FiveHour, null, percent, resetsAt); }
+        public static UsageWindow Week(double? percent, DateTimeOffset? resetsAt) { return new UsageWindow(UsageSpan.Week, null, percent, resetsAt); }
+        public static UsageWindow Scoped(string rawModelName, double? percent, DateTimeOffset? resetsAt)
+        { return new UsageWindow(UsageSpan.Week, CleanModelName(rawModelName) ?? UnnamedModel, percent, resetsAt); }
+        public string Label { get { return Span == UsageSpan.FiveHour ? "5時間" : Scope == null ? "週" : "週（" + Scope + "）"; } }
+        public string ShortLabel { get { return Span == UsageSpan.FiveHour ? "5h" : Scope ?? "週"; } }
+        // Model names come from the service: keep a small safe character set, at most 24 characters.
+        public static string CleanModelName(string raw)
+        {
+            if (raw == null) return null;
+            var text = new StringBuilder(); bool space = false;
+            foreach (char c in raw)
+            {
+                if (char.IsWhiteSpace(c)) { space = text.Length > 0; continue; }
+                bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '+' || c == '-' || c == '(' || c == ')';
+                if (!allowed) continue;
+                if (space) { text.Append(' '); space = false; }
+                text.Append(c);
+            }
+            string value = text.Length > 24 ? text.ToString(0, 24).TrimEnd() : text.ToString();
+            return value.Length == 0 ? null : value;
+        }
     }
     public sealed class ServiceUsage
     {
@@ -28,9 +55,9 @@ namespace AIUsageManager
         public bool HasData { get { return Windows.Any(w => w.Percent.HasValue); } }
         public static ServiceUsage Empty(string name, string status)
         {
+            // Every service has a weekly limit; other windows appear only when the service returns them.
             var value = new ServiceUsage { Name = name, Status = status };
-            if (name == "Claude") value.Windows.Add(new UsageWindow("5時間", null, null));
-            value.Windows.Add(new UsageWindow("週", null, null));
+            value.Windows.Add(UsageWindow.Week(null, null));
             return value;
         }
     }

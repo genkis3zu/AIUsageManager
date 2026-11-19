@@ -190,7 +190,7 @@ internal static partial class Tests
             var root=Fixture();Auth(root); var paths=Directory.GetFiles(root,"*",SearchOption.AllDirectories);var bytes=paths.Select(File.ReadAllText).ToArray();
             using(var handler=new FakeHttp()) using(var http=new HttpClient(handler)) {
                 var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();
-                Assert(values[0].Windows[1].Percent==98 && values[0].Plan=="Max 20x" && values[2].Windows[0].Percent==42 && handler.Calls==3 && handler.HeadersCorrect);
+                Assert(values[0].Windows[1].Percent==98 && values[0].Plan=="Ultra" && values[2].Windows[0].Percent==42 && handler.Calls==3 && handler.HeadersCorrect);
             }
             Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
         });

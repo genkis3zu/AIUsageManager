@@ -8,8 +8,7 @@ internal static partial class Tests
     static ServiceUsage[] WidgetValues()
     {
         var values=new[]{ServiceUsage.Empty("Claude",""),ServiceUsage.Empty("Codex",""),ServiceUsage.Empty("Grok","")};
-        values[0].Plan="Max 20x";values[0].Windows[0].Percent=1;values[0].Windows[1].Percent=98;
-        values[0].Windows[0].ResetsAt=T.AddHours(4);values[0].Windows[1].ResetsAt=T.AddDays(2);
+        values[0].Plan="Max 20x";values[0].Windows.Clear();values[0].Windows.Add(UsageWindow.FiveHour(1,T.AddHours(4)));values[0].Windows.Add(UsageWindow.Week(98,T.AddDays(2)));
         values[1].Windows[0].Percent=0;
         foreach(var value in values){value.RecordedAt=T.AddHours(-1);value.Source="CLI 記録";}
         return values;

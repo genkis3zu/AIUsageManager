@@ -23,7 +23,7 @@ internal static class Diagnostics
         else
         {
             var now=DateTimeOffset.Now;
-            var claude=ServiceUsage.Empty("Claude","");claude.Plan="Max 20x";claude.Source="オンライン";claude.RecordedAt=now;
+            var claude=ServiceUsage.Empty("Claude","");claude.Plan="Max";claude.Source="オンライン";claude.RecordedAt=now;claude.Windows.Insert(0,UsageWindow.FiveHour(null,null));
             claude.Windows[0].Percent=1;claude.Windows[0].ResetsAt=now.AddHours(4.5);claude.Windows[1].Percent=98;claude.Windows[1].ResetsAt=now.AddDays(2);
             var codex=ServiceUsage.Empty("Codex","");codex.Plan="Pro Lite";codex.Source="CLI 記録";codex.RecordedAt=now.AddHours(-3);codex.Windows[0].Percent=50;codex.Windows[0].ResetsAt=now.AddDays(3);
             var grok=ServiceUsage.Empty("Grok","");grok.Plan="Ultra";grok.Source="オンライン";grok.RecordedAt=now;grok.Windows[0].Percent=42;grok.Windows[0].ResetsAt=now.AddDays(2.5);

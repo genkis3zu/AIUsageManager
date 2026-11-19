@@ -89,7 +89,7 @@ namespace AIUsageManager
         {
             var values=Unavailable();
             for(int i=0;i<values.Length;i++){values[i].RecordedAt=now;values[i].Source="サンプル";values[i].Status="";values[i].Plan=i==0?"Max":i==1?"Plus":"SuperGrok";foreach(var window in values[i].Windows){window.Percent=i==0?82:i==1?50:25;window.ResetsAt=now.AddDays(2);}}
-            values[0].Windows[0].Percent=5;values[0].Windows[0].ResetsAt=now.AddHours(4);return values;
+            values[0].Windows.Insert(0,UsageWindow.FiveHour(5,now.AddHours(4)));return values;
         }
     }
 }

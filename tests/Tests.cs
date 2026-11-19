@@ -14,15 +14,68 @@ internal static partial class Tests
     static void Assert(bool value) { if (!value) throw new Exception("assertion"); }
     static string Codex(string limits)
     { return "{\"timestamp\":\"2026-10-10T09:00:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"rate_limits\":" + limits + "}}"; }
+    // Fixture JSON written with single quotes for readability.
+    static string J(string value) { return value.Replace('\'', '"'); }
+    static string Labels(ServiceUsage value) { return string.Join("|", value.Windows.Select(w => w.Label)); }
+    static string Limit(string kind, int percent, string model)
+    {
+        return "{'kind':'" + kind + "','group':'weekly','percent':" + percent + ",'severity':'normal','resets_at':'2026-11-22T23:00:00.123+00:00'," +
+            "'scope':" + (model == null ? "null" : "{'model':{'id':null,'display_name':'" + model + "'},'surface':null}") + ",'is_active':false}";
+    }
     public static int Main()
     {
         Check("Claude explicit zero is acquired", () => {
             var r = UsageParser.Claude("{\"five_hour\":{\"utilization\":0},\"seven_day\":{\"utilization\":98}}", "max", T, "API");
             Assert(r.Windows[0].Percent == 0 && r.Windows[1].Percent == 98 && r.RecordedAt == T);
         });
-        Check("Claude independently missing window", () => {
+        Check("Claude window the service does not return is not shown", () => {
             var r = UsageParser.Claude("{\"five_hour\":null,\"seven_day\":{\"utilization\":20}}", "max", T, "API");
-            Assert(!r.Windows[0].Percent.HasValue && r.Windows[1].Percent == 20);
+            Assert(Labels(r) == "週" && r.Windows[0].Percent == 20);
+        });
+        Check("Claude Ultra limits give 週 and 週（Fable） without 5時間", () => {
+            var r = UsageParser.Claude(J("{'five_hour':null,'seven_day':{'utilization':40,'resets_at':'2026-11-22T23:00:00.123+00:00'},'limits':[" + Limit("weekly_all", 40, null) + "," + Limit("weekly_scoped", 70, "Fable") + "]}"), "max", T, "API");
+            Assert(Labels(r) == "週|週（Fable）" && string.Join("|", r.Windows.Select(w => w.ShortLabel)) == "週|Fable");
+            Assert(r.Windows[0].Percent == 40 && r.Windows[1].Percent == 70 && r.Windows.All(w => w.Span == UsageSpan.Week && w.ResetsAt.HasValue));
+            Assert(r.Windows[0].Scope == null && r.Windows[1].Scope == "Fable" && r.Status == "");
+        });
+        Check("Claude Max limits give 5時間, 週 and 週（Fable） in order", () => {
+            var r = UsageParser.Claude(J("{'limits':[" + Limit("weekly_scoped", 10, "Fable") + "," + Limit("weekly_all", 20, null) + "," + Limit("session", 30, null) + "]}"), "max", T, "API");
+            Assert(Labels(r) == "5時間|週|週（Fable）" && r.Windows[0].Span == UsageSpan.FiveHour && r.Windows[0].ShortLabel == "5h");
+            Assert(r.Windows[0].Percent == 30 && r.Windows[1].Percent == 20 && r.Windows[2].Percent == 10);
+        });
+        Check("Claude limits with only unknown kinds fall back to legacy fields", () => {
+            var r = UsageParser.Claude(J("{'limits':[{'kind':'future_kind','percent':5}],'five_hour':{'utilization':10},'seven_day':{'utilization':20}}"), "max", T, "API");
+            Assert(Labels(r) == "5時間|週" && r.Windows[0].Percent == 10 && r.Windows[1].Percent == 20);
+        });
+        Check("Claude legacy five_hour fills a missing session window", () => {
+            var r = UsageParser.Claude(J("{'limits':[" + Limit("weekly_all", 25, null) + "],'five_hour':{'utilization':12},'seven_day':{'utilization':99}}"), "max", T, "API");
+            Assert(Labels(r) == "5時間|週" && r.Windows[0].Percent == 12 && r.Windows[1].Percent == 25);
+        });
+        Check("Claude duplicate windows keep the higher percent", () => {
+            var r = UsageParser.Claude(J("{'limits':[" + Limit("weekly_all", 30, null) + "," + Limit("weekly_all", 55, null) + "," + Limit("weekly_scoped", 60, "Fable") + "," + Limit("weekly_scoped", 15, "Fable") + "]}"), "max", T, "API");
+            Assert(Labels(r) == "週|週（Fable）" && r.Windows[0].Percent == 55 && r.Windows[1].Percent == 60);
+        });
+        Check("Claude limits with invalid percent are ignored", () => {
+            var r = UsageParser.Claude(J("{'limits':[{'kind':'weekly_all','percent':'bad'},{'kind':'session','percent':-3}],'seven_day':{'utilization':33}}"), "max", T, "API");
+            Assert(Labels(r) == "週" && r.Windows[0].Percent == 33);
+        });
+        Check("Claude model names are cleaned, never dropped", () => {
+            var r = UsageParser.Claude(J("{'limits':[" + Limit("weekly_scoped", 1, "Fable\\u0007  (Preview) <b>") + "," + Limit("weekly_scoped", 2, "\\u0001\\u0002") + "," + Limit("weekly_scoped", 3, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn") + "]}"), "max", T, "API");
+            Assert(Labels(r) == "週（Fable (Preview) b）|週（モデル別）|週（ABCDEFGHIJKLMNOPQRSTUVWX）" && r.Windows[1].ShortLabel == "モデル別");
+            var missing = UsageParser.Claude(J("{'limits':[{'kind':'weekly_scoped','percent':4}]}"), "max", T, "API");
+            Assert(Labels(missing) == "週（モデル別）");
+        });
+        Check("Claude more than four windows keep the first four", () => {
+            var r = UsageParser.Claude(J("{'limits':[" + Limit("session", 1, null) + "," + Limit("weekly_all", 2, null) + "," + Limit("weekly_scoped", 3, "A") + "," + Limit("weekly_scoped", 4, "B") + "," + Limit("weekly_scoped", 5, "C") + "]}"), "max", T, "API");
+            Assert(Labels(r) == "5時間|週|週（A）|週（B）");
+        });
+        Check("Claude response without any window keeps one unknown weekly placeholder", () => {
+            var r = UsageParser.Claude("{}", "max", T, "API");
+            Assert(Labels(r) == "週" && !r.HasData && r.Status == "使用量を取得できません");
+        });
+        Check("Claude plan names follow Ultra and Max", () => {
+            Assert(Json.Plan("max", "default_claude_max_20x") == "Ultra" && Json.Plan("max", "default_claude_max_5x") == "Max");
+            Assert(Json.Plan("max", null) == "Max" && Json.Plan("ultra", null) == "Ultra" && Json.Plan("pro", null) == "Pro");
         });
         Check("Claude statusline percentages and Unix reset", () => {
             var r = UsageParser.Claude("{\"rate_limits\":{\"five_hour\":{\"used_percentage\":2,\"resets_at\":1791669600}}}", "max", T, "cache");
@@ -68,7 +121,7 @@ internal static partial class Tests
         Check("Unknown plan never echoes arbitrary input", () => Assert(!UsageParser.Claude("{}", "secret-value", T,"API").Plan.Contains("secret")));
         Check("Unknown date never becomes now", () => Assert(!UsageParser.Claude("{\"five_hour\":{\"utilization\":1,\"resets_at\":999999999999999999}}", "max", null,"API").RecordedAt.HasValue));
         Check("Zero and unknown text differ", () => Assert(UsageText.Percent(0)=="0%" && UsageText.Percent(null)=="未取得"));
-        Check("Expired data requests fresh observation", () => Assert(UsageText.Reset(new UsageWindow("週",50,T), T.AddMinutes(1)).Contains("再取得待ち")));
+        Check("Expired data requests fresh observation", () => Assert(UsageText.Reset(UsageWindow.Week(50,T), T.AddMinutes(1)).Contains("再取得待ち")));
         RunProviderTests();
         RunGrokWebTests();
         RunWidgetTests();
