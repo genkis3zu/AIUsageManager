@@ -88,12 +88,33 @@ internal static partial class Tests
             var r=UsageParser.Codex(Codex("{\"limit_id\":\"codex\",\"primary\":{\"window_minutes\":10080,\"used_percent\":50,\"resets_at\":1791952268},\"plan_type\":\"prolite\"}"));
             Assert(r != null && r.Windows.Single().Percent==50 && r.RecordedAt==T && r.Plan=="Pro Lite");
         });
-        Check("Codex weekly secondary ignores 5h primary", () => {
+        Check("Codex log 300 and 10080 minutes give 5時間 and 週", () => {
             var r=UsageParser.Codex(Codex("{\"primary\":{\"window_minutes\":300,\"used_percent\":99},\"secondary\":{\"window_minutes\":10080,\"used_percent\":0}}"));
-            Assert(r != null && r.Windows[0].Percent==0);
+            Assert(r != null && Labels(r)=="5時間|週" && r.Windows[0].Percent==99 && r.Windows[1].Percent==0);
+        });
+        Check("Codex log other window lengths are ignored", () => {
+            var r=UsageParser.Codex(Codex("{\"primary\":{\"window_minutes\":1440,\"used_percent\":10},\"secondary\":{\"window_minutes\":10080,\"used_percent\":5}}"));
+            Assert(r != null && Labels(r)=="週" && r.Windows[0].Percent==5);
         });
         Check("Codex other limit IDs ignored", () => Assert(UsageParser.Codex(Codex("{\"limit_id\":\"review\",\"primary\":{\"window_minutes\":10080,\"used_percent\":99}}"))==null));
-        Check("Codex five-hour-only is not weekly", () => Assert(UsageParser.Codex(Codex("{\"primary\":{\"window_minutes\":300,\"used_percent\":99}}"))==null));
+        Check("Codex five-hour-only log gives 5時間", () => {
+            var r=UsageParser.Codex(Codex("{\"primary\":{\"window_minutes\":300,\"used_percent\":99}}"));
+            Assert(r != null && Labels(r)=="5時間" && r.Windows[0].Percent==99);
+        });
+        Check("Codex online Plus gives 5時間 and 週, other lengths ignored", () => {
+            var r=UsageParser.CodexOnline(J("{'plan_type':'plus','rate_limit':{'primary_window':{'used_percent':12,'limit_window_seconds':18000,'reset_at':1791669600},'secondary_window':{'used_percent':34,'limit_window_seconds':604800,'reset_at':1791952268}},'code_review_rate_limit':{'primary_window':{'used_percent':80,'limit_window_seconds':604800}}}"),T);
+            Assert(Labels(r)=="5時間|週" && r.Windows[0].Percent==12 && r.Windows[1].Percent==34 && r.Status=="" && r.Plan=="Plus");
+            var day=UsageParser.CodexOnline(J("{'rate_limit':{'primary_window':{'used_percent':10,'limit_window_seconds':86400}}}"),T);
+            Assert(Labels(day)=="週" && !day.HasData && day.Status=="使用量を取得できません");
+        });
+        Check("Codex online Pro gives only 週", () => {
+            var r=UsageParser.CodexOnline(J("{'plan_type':'prolite','rate_limit':{'primary_window':{'used_percent':7,'limit_window_seconds':604800,'reset_at':1791952268},'secondary_window':null}}"),T);
+            Assert(Labels(r)=="週" && r.Windows[0].Percent==7 && r.Status=="");
+        });
+        Check("Codex online 5-hour only is still acquired", () => {
+            var r=UsageParser.CodexOnline(J("{'rate_limit':{'primary_window':{'used_percent':20,'limit_window_seconds':18000}}}"),T);
+            Assert(Labels(r)=="5時間" && r.HasData && r.Status=="");
+        });
         Check("Codex prompt-shaped data ignored", () => Assert(UsageParser.Codex("{\"type\":\"response_item\",\"payload\":{\"rate_limits\":{\"primary\":{\"window_minutes\":10080,\"used_percent\":99}}}}") == null));
         Check("Grok log schema and observation time", () => {
             var r=UsageParser.Grok("{\"ts\":\"2026-10-10T09:00:00Z\",\"ctx\":{\"subscriptionTier\":\"SuperGrok Heavy\",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"USAGE_PERIOD_TYPE_WEEKLY\",\"end\":\"2026-10-13T09:01:54.789425+00:00\"}}}}", null,"CLI 記録");

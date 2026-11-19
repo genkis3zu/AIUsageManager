@@ -95,14 +95,14 @@ internal static partial class Tests
             }
             Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
         });
-        Check("Codex online secondary weekly zero ignores primary five-hour", () => {
+        Check("Codex online primary five-hour and secondary weekly zero are both shown", () => {
             var root=Fixture();CodexAuth(root);
             using(var handler=new FakeHttp { CodexBody="{\"rate_limit\":{\"primary_window\":{\"used_percent\":90,\"limit_window_seconds\":18000},\"secondary_window\":{\"used_percent\":0,\"limit_window_seconds\":604800}}}" })using(var http=new HttpClient(handler)) {
-                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(value.Windows[0].Percent==0 && value.Source=="オンライン");
+                var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(Labels(value)=="5時間|週" && value.Windows[0].Percent==90 && value.Windows[1].Percent==0 && value.Source=="オンライン");
             }
         });
         Check("Codex successful response without weekly percentage never resurrects old logs", () => {
-            foreach(string body in new[]{"{}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800}}}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":18000,\"used_percent\":20}},\"code_review_rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800,\"used_percent\":80}}}"}) {
+            foreach(string body in new[]{"{}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800}}}","{\"rate_limit\":{\"primary_window\":{\"limit_window_seconds\":86400,\"used_percent\":20}},\"code_review_rate_limit\":{\"primary_window\":{\"limit_window_seconds\":604800,\"used_percent\":80}}}"}) {
                 var root=Fixture();CodexAuth(root);File.WriteAllText(Path.Combine(root,".codex","sessions","old.jsonl"),Weekly(63));
                 using(var http=new HttpClient(new FakeHttp { CodexBody=body })) {
                     var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];Assert(!value.HasData && value.Source=="オンライン");

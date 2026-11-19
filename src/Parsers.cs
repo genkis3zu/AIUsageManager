@@ -137,37 +137,40 @@ namespace AIUsageManager
             var limits = Json.Obj(payload, "rate_limits");
             var id = Json.Str(limits, "limit_id");
             if (limits == null || (!string.IsNullOrEmpty(id) && id != "codex")) return null;
-            foreach (string key in new[] { "primary", "secondary" })
-            {
-                var window = Json.Obj(limits, key);
-                if (Json.Number(Json.Get(window, "window_minutes")) != 10080) continue;
-                var percent = Json.Percent(Json.Get(window, "used_percent"));
-                if (!percent.HasValue) continue;
-                var result = ServiceUsage.Empty("Codex", "");
-                result.Plan = Json.Plan(Json.Str(limits, "plan_type"), null);
-                result.Source = "CLI 記録"; result.RecordedAt = Json.Date(Json.Get(root, "timestamp"));
-                result.Windows[0].Percent = percent;
-                result.Windows[0].ResetsAt = Json.Date(Json.Get(window, "resets_at"));
-                return result;
-            }
-            return null;
+            var result = CodexWindows(limits, "primary", "secondary", "window_minutes", 300, 10080, "resets_at");
+            if (!result.HasData) return null;
+            result.Plan = Json.Plan(Json.Str(limits, "plan_type"), null);
+            result.Source = "CLI 記録"; result.RecordedAt = Json.Date(Json.Get(root, "timestamp"));
+            return result;
         }
         public static ServiceUsage CodexOnline(string json, DateTimeOffset time)
         {
-            var result = ServiceUsage.Empty("Codex", "週の使用量を取得できません");
             var root = Json.Parse(json);
+            var result = CodexWindows(Json.Obj(root, "rate_limit"), "primary_window", "secondary_window", "limit_window_seconds", 18000, 604800, "reset_at");
             result.Plan = Json.Plan(Json.Str(root, "plan_type"), null);
             result.Source = "オンライン"; result.RecordedAt = time;
-            var limits = Json.Obj(root, "rate_limit");
-            foreach (string key in new[] { "primary_window", "secondary_window" })
+            result.Status = result.HasData ? "" : "使用量を取得できません";
+            return result;
+        }
+        // Codex returns up to two windows. Pro plans have only the weekly one; Plus also has a 5-hour one.
+        // Other lengths and separate limits (code review etc.) are not mixed in.
+        static ServiceUsage CodexWindows(Dictionary<string, object> limits, string first, string second, string lengthKey, double fiveHour, double week, string resetKey)
+        {
+            UsageWindow session = null, weekly = null;
+            foreach (string key in new[] { first, second })
             {
                 var window = Json.Obj(limits, key);
-                if (Json.Number(Json.Get(window, "limit_window_seconds")) != 604800) continue;
-                result.Windows[0].Percent = Json.Percent(Json.Get(window, "used_percent"));
-                result.Windows[0].ResetsAt = Json.Date(Json.Get(window, "reset_at"));
-                if (result.HasData) result.Status = "";
-                break;
+                var percent = Json.Percent(Json.Get(window, "used_percent"));
+                if (!percent.HasValue) continue;
+                var length = Json.Number(Json.Get(window, lengthKey));
+                var reset = Json.Date(Json.Get(window, resetKey));
+                if (length == fiveHour && session == null) session = UsageWindow.FiveHour(percent, reset);
+                else if (length == week && weekly == null) weekly = UsageWindow.Week(percent, reset);
             }
+            var result = new ServiceUsage { Name = "Codex" };
+            if (session != null) result.Windows.Add(session);
+            if (weekly != null) result.Windows.Add(weekly);
+            if (result.Windows.Count == 0) result.Windows.Add(UsageWindow.Week(null, null));
             return result;
         }
         public static ServiceUsage Grok(string json, DateTimeOffset? time, string source)
