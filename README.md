@@ -4,7 +4,7 @@
 
 **Claude・Codex・Grokの使用量とリセット時間を、ひとつの場所で。**
 
-Windows 11のタスクトレイから開く、軽量な使用量モニターです。作業中に残りの枠を確認し、上限が近づいたら通知で気づけます。Obsidianのノート上部やWindowsウィジェットにも表示できます。表示言語は日本語です。
+Windows 11のタスクトレイから開く、軽量な使用量モニターです。作業中に残りの枠を確認し、上限が近づいたら通知で気づけます。Obsidianのノート上部、Windowsウィジェット、Stream Deckのキーにも表示できます。表示言語は日本語です。
 
 [![Windows build](https://github.com/genkis3zu/AIUsageManager/actions/workflows/build.yml/badge.svg)](https://github.com/genkis3zu/AIUsageManager/actions/workflows/build.yml)
 
@@ -21,7 +21,7 @@ Windows 11のタスクトレイから開く、軽量な使用量モニターで�
 - **3サービスを一覧で確認** — Claudeの5時間・週、CodexとGrokの週枠を表示。プラン名、使用率、リセットまでの時間、取得時刻が分かります。
 - **上限が近づいたら通知** — 90%・95%・100%への到達、急増、学習した予測による警告をWindows通知と画面内の文章で知らせます。
 - **使い方の傾向から予測** — 使用率の履歴を蓄積し、過去の予測誤差で補正。90%・95%までの目安を幅で表示します。
-- **いつもの作業場所に表示** — Obsidianの固定ツールバーは標準3行／縮小1行。Windowsのウィジェットボードにも追加できます。
+- **いつもの作業場所に表示** — Obsidianの固定ツールバーは標準3行／縮小1行。Windowsのウィジェットボード、Stream Deckのキーにも追加できます。
 - **Windows標準の仕組みで常駐** — トレイ版は.NET Framework 4.8 / 4.8.1とWindows Formsで動作。追加ランタイム、WebView2、Node.js、Pythonのインストールは不要です。
 
 5分ごとに自動更新し、手動更新にも対応します。ライト／ダーク／Windowsに合わせる、の3つから配色を選べます。
@@ -62,14 +62,18 @@ Win+Wのボードへ中／大サイズのカードを追加できます。使用
 
 画像はAdaptive Cardsの公式ホスト設定による架空データのプレビューです。Windowsのボードでの描画には差が出る場合があります。ウィジェットは追加のランタイム・登録が必要なオプションです。[Windowsウィジェットの追加手順 →](docs/widgets-guide.md)
 
+### Stream Deckのキーにも
+
+Claude・Codex・Grokのキーを置けます。表示スタイルはリング／縦バー／横バー、数値は使用率／残りから選べます。**値はトレイアプリから受け取るだけで、プラグインはAIサービスに問い合わせません。** トレイアプリが止まっているときは「未接続」と表示し、キーを押すと起動します。第三者製の「AI Limits」プラグインと併用するとClaudeの取得が失敗することがあるため、移行手順もガイドにまとめています。[Stream Deck連携の導入・操作 →](docs/streamdeck-guide.md)
+
 ## はじめる
 
 | 使う版 | 含まれる機能 | 入手方法 |
 |---|---|---|
 | **公開Release v1.0.0** | 基本のトレイ一覧、テーマ切替、5分ごとの更新 | [ReleaseからZIPをダウンロード](https://github.com/genkis3zu/AIUsageManager/releases/latest) |
-| **main・1.1開発版** | 上記に加え、ログインボタン、通知、学習する予測、Obsidian連携、Windowsウィジェット | [ソースからビルド](#ソースからビルド) |
+| **main・1.1開発版** | 上記に加え、ログインボタン、通知、学習する予測、Obsidian連携、Windowsウィジェット、Stream Deck連携 | [ソースからビルド](#ソースからビルド) |
 
-**このREADMEの通知・予測・Obsidian・ウィジェット機能は、v1.0.0のZIPには含まれません。**
+**このREADMEの通知・予測・Obsidian・ウィジェット・Stream Deck機能は、v1.0.0のZIPには含まれません。**
 
 ### トレイ版を起動する
 
@@ -131,6 +135,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 | [開発・貢献ガイド](CONTRIBUTING.md) | ビルド、テスト、配布ZIPの作成 |
 | [Obsidian連携](docs/obsidian-guide.md) | プラグインの導入と表示切替 |
 | [Windowsウィジェット](docs/widgets-guide.md) | 必要なランタイム、登録、削除 |
+| [Stream Deck連携](docs/streamdeck-guide.md) | 導入、表示と操作、AI Limitsからの移行 |
 | [警告と予測](docs/alerts.md) | 通知条件、学習、予測の限界 |
 | [設計](docs/design.md)・[検証範囲](docs/verification.md) | 内部構成、確認済みの動作 |
 | [公開画像について](docs/images/README.md) | スクリーンショットの出所と架空データ |

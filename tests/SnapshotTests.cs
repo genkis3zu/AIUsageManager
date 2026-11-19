@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.IO.Pipes;
 using System.Security.AccessControl;
 using System.Security.Principal;
@@ -13,6 +14,22 @@ internal static partial class Tests
 {
     static void RunSnapshotTests()
     {
+        Check("App location is versioned JSON and the latest path wins",()=> {
+            string dir=Path.Combine(Path.GetTempPath(),"aum-loc-"+Guid.NewGuid().ToString("N")),file=Path.Combine(dir,"app-location.json");
+            try {
+                Assert(AppLocation.Save(file,@"C:\Old\AIUsageManager.exe") && AppLocation.Save(file,@"D:\Apps\AIUsageManager.exe"));
+                var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(File.ReadAllText(file));
+                Assert((int)data["schemaVersion"]==1 && (string)data["path"]==@"D:\Apps\AIUsageManager.exe" && data.Count==2 && !File.Exists(file+".tmp"));
+            } finally {try{Directory.Delete(dir,true);}catch{}}
+        });
+        Check("App location failure is reported, not thrown",()=> {
+            string blocker=Path.GetTempFileName();
+            try {Assert(!AppLocation.Save(Path.Combine(blocker,"app-location.json"),@"C:\Apps\AIUsageManager.exe"));}
+            finally {File.Delete(blocker);}
+        });
+        Check("App location default is under the user's local app data",()=> {
+            Assert(AppLocation.DefaultPath()==Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","app-location.json"));
+        });
         Check("Snapshot carries a recent pace basis and drops it when stale",()=> {
             var values=WidgetCards.Sample(T);values[1].Source="オンライン";values[1].Windows[0].Percent=36;
             values[1].Windows[0].Pace=Forecast(Routine(T.AddDays(-5),120,t=>0.3));

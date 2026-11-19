@@ -1,0 +1,51 @@
+{
+  "Name": "AI Usage Manager",
+  "Version": "1.1.0.0",
+  "Author": "AI Usage Manager contributors",
+  "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量を表示します。このプラグイン自身はAIサービスに問い合わせません。",
+  "URL": "https://github.com/genkis3zu/AIUsageManager",
+  "UUID": "io.github.genkis3zu.aiusagemanager",
+  "CodePath": "bin/plugin.cjs",
+  "Nodejs": { "Version": "24" },
+  "SDKVersion": 2,
+  "Software": { "MinimumVersion": "7.6" },
+  "OS": [{ "Platform": "windows", "MinimumVersion": "10" }],
+  "Category": "AI Usage Manager",
+  "CategoryIcon": "imgs/category",
+  "Icon": "imgs/plugin",
+  "Actions": [
+    {
+      "UUID": "io.github.genkis3zu.aiusagemanager.claude",
+      "Name": "Claude 使用量",
+      "Tooltip": "Claudeの使用量を表示します",
+      "Icon": "imgs/action",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/settings.html",
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [{ "Image": "imgs/key", "ShowTitle": false }]
+    },
+    {
+      "UUID": "io.github.genkis3zu.aiusagemanager.codex",
+      "Name": "Codex 使用量",
+      "Tooltip": "Codexの週の使用量を表示します",
+      "Icon": "imgs/action",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/settings.html",
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [{ "Image": "imgs/key", "ShowTitle": false }]
+    },
+    {
+      "UUID": "io.github.genkis3zu.aiusagemanager.grok",
+      "Name": "Grok 使用量",
+      "Tooltip": "Grokの週の使用量を表示します",
+      "Icon": "imgs/action",
+      "Controllers": ["Keypad"],
+      "PropertyInspectorPath": "ui/settings.html",
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [{ "Image": "imgs/key", "ShowTitle": false }]
+    }
+  ]
+}

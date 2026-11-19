@@ -58,6 +58,7 @@ namespace AIUsageManager
                 if(loginCodex)codexLogin.Set();else if(loginGrok)grokLogin.Set();
                 bool refresh=args.Length==1&&args[0]=="--refresh";
                 if(!created){if(refresh)refreshSignal.Set();else if(!loginCodex&&!loginGrok)signal.Set();return;}
+                AppLocation.Save(AppLocation.DefaultPath(),Application.ExecutablePath);
                 try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{codexLogin,grokLogin},null,snapshots,refreshSignal));}
                 finally {mutex.ReleaseMutex();}
             }

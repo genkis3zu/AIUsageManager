@@ -12,8 +12,10 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Forecast.cs` | 最近・長期・曜日時間帯のモデル、過去時点での検証、誤差による比重調整 |
 | `ForecastHistory.cs` | 90日間の使用率履歴、Windowsユーザー別暗号化、サイズ制限と削除 |
 | `Pace.cs` | 学習状態、90%・95%の予測幅、100%の目安と観測根拠 |
-| `Snapshot.cs` | Obsidian向け表示データ、現在ユーザー限定の名前付きパイプ、時間・出力量の上限 |
+| `Snapshot.cs` | Obsidian・Stream Deck向け表示データ、現在ユーザー限定の名前付きパイプ、時間・出力量の上限 |
+| `AppLocation.cs` | Stream Deckプラグインがトレイ版を起動するための、実行ファイルの場所の記録 |
 | `obsidian/src/` | 固定ツールバー、表示サイズ、鮮度判定、常駐アプリとの連携 |
+| `streamdeck/src/` | Stream Deckのキー表示、名前付きパイプの読み取り、未接続時のトレイ版の起動。鮮度判定は `obsidian/src/usage.js` を共用 |
 | `PopupForm.cs` | 使用量と警告帯、ボタン、キーボード、スクロール・DPIレイアウト |
 | `Artwork.cs` | 描画補助、サービスの印、埋込アプリアイコン |
 | `Models.cs` / `Parsers.cs` | 表示用モデル、欠損値・期間・時刻の解釈 |

@@ -23,6 +23,12 @@ jobs:
       - name: Verify allowlisted Obsidian package
         shell: powershell
         run: .\tools\package-obsidian.ps1 -SkipBuild
+      - name: Test, build and package Stream Deck plugin
+        shell: powershell
+        run: |
+          node --test streamdeck/tests/pipe.test.cjs streamdeck/tests/render.test.cjs streamdeck/tests/location.test.cjs streamdeck/tests/streamdeck.test.cjs streamdeck/tests/plugin.test.cjs streamdeck/tests/build.test.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Stream Deck tests failed' }
+          .\tools\package-streamdeck.ps1
       - name: Build native widget provider and run transport tests
         shell: powershell
         run: .\tools\build-widgets.ps1 -SkipCoreBuild
