@@ -61,6 +61,19 @@ test('settings preserve only supported mode and an absolute executable path',()=
   assert.deepEqual(normalizeSettings({mode:'invalid',appPath:'cmd /c bad',extra:'discard'}),{mode:'standard',appPath:''});
   assert.deepEqual(normalizeSettings({mode:'compact',appPath:'C:\\Apps\\AIUsageManager.exe'}),{mode:'compact',appPath:'C:\\Apps\\AIUsageManager.exe'});
 });
+test('the AIの状況 status is kept when valid; a bad page or tone never passes through',()=> {
+  const status={tone:'critical',title:'Claude 障害',detail:'Claude Code',page:'https://status.claude.com/',line:'Claude 障害（Claude Code）'};
+  const p=payload();p.status=status;
+  assert.deepEqual(parseSnapshot(JSON.stringify(p)).status,status);
+  assert.equal(parseSnapshot(JSON.stringify(payload())).status,null);
+  for(const tone of ['purple','',null,1]){const q=payload();q.status={...status,tone};assert.equal(parseSnapshot(JSON.stringify(q)).status,null,String(tone));}
+  for(const page of ['https://evil.example/','http://status.claude.com/','https://status.claude.com/x','javascript:alert(1)',1]){const q=payload();q.status={...status,page};assert.equal(parseSnapshot(JSON.stringify(q)).status.page,null,String(page));}
+  const openai=payload();openai.status={...status,page:'https://status.openai.com/'};assert.equal(parseSnapshot(JSON.stringify(openai)).status.page,'https://status.openai.com/');
+  const long=payload();long.status={...status,title:'x'.repeat(100),detail:'y'.repeat(300)};const s=parseSnapshot(JSON.stringify(long)).status;
+  assert.equal(s.title.length,60);assert.equal(s.detail.length,180);
+  for(const bad of ['text',[],null]){const q=payload();q.status=bad;assert.equal(parseSnapshot(JSON.stringify(q)).status,null);}
+  assert.equal(parseSnapshot(JSON.stringify({schemaVersion:2,connected:false,services:[],status})).status,null);
+});
 module.exports={payload,now};
 
 test('Grok login requirement hides legacy usage and reset information',()=> {

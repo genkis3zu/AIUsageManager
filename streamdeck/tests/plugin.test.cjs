@@ -14,7 +14,7 @@ const appear = (context, action = ID + '.codex', settings = {}) => ({ event: 'wi
 function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', launch = async () => {} } = {}) {
   const sent = [], resolveCalls = [], launches = [], launchArgs = [];
   let clock = 1000, readCount = 0;
-  const deck = { setImage: (c, svg) => sent.push(['image', c, svg]), setSettings: (c, s) => sent.push(['settings', c, s]), showAlert: c => sent.push(['alert', c]) };
+  const deck = { setImage: (c, svg) => sent.push(['image', c, svg]), setSettings: (c, s) => sent.push(['settings', c, s]), showAlert: c => sent.push(['alert', c]), openUrl: url => sent.push(['open', url]) };
   const timers = {
     intervals: [], timeouts: [],
     setInterval(fn, ms) { const t = { fn, ms, cleared: false }; this.intervals.push(t); return t; },
@@ -28,6 +28,7 @@ function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', l
     launchApp: async (file, args) => { launches.push(file); launchArgs.push(args || []); return launch(file); },
   });
   return { plugin, sent, timers, resolveCalls, launches, launchArgs, reads: () => readCount, tick: ms => { clock += ms; },
+    opened: () => sent.filter(s => s[0] === 'open').map(s => s[1]),
     images: context => sent.filter(s => s[0] === 'image' && s[1] === context).map(s => s[2]),
     settings: context => sent.filter(s => s[0] === 'settings' && s[1] === context).map(s => s[2]) };
 }
@@ -209,6 +210,40 @@ test('didReceiveSettings replaces the key settings', async () => {
   await h.plugin.handle(appear('k1'));
   await h.plugin.handle({ event: 'didReceiveSettings', context: 'k1', payload: { settings: { style: 'vertical', metric: 'remaining', showReset: true, palette: 'green' } } });
   assert.ok(h.images('k1').at(-1).includes('70%'));
+});
+const withStatus = status => { const s = JSON.parse(SNAP); s.status = status; return JSON.stringify(s); };
+const OUTAGE = { tone: 'warning', title: 'OpenAI 一部不調', detail: 'Codex', page: 'https://status.openai.com/', line: 'OpenAI 一部不調（Codex）' };
+test('the AIの状況 key shows the shared status and saves no settings', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withStatus(OUTAGE) }] });
+  await h.plugin.handle(appear('s1', ID + '.status', { style: 'ring' }));
+  const svg = h.images('s1').at(-1);
+  assert.ok(svg.includes('>AIの状況<') && svg.includes('>OpenAI<') && svg.includes('>一部不調<') && svg.includes('>Codex<'));
+  assert.deepEqual(h.settings('s1'), []);
+  await h.plugin.handle({ event: 'didReceiveSettings', context: 's1', payload: { settings: { palette: 'blue' } } });
+  assert.equal(h.images('s1').at(-1), svg);
+});
+test('pressing the AIの状況 key opens that company status page, short or long', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withStatus(OUTAGE) }] });
+  await h.plugin.handle(appear('s1', ID + '.status'));
+  await press(h, 's1', 100); await press(h, 's1', 700);
+  assert.deepEqual(h.opened(), ['https://status.openai.com/', 'https://status.openai.com/']);
+  assert.deepEqual(h.settings('s1'), []); assert.deepEqual(h.launches, []);
+});
+test('without an outage page the AIの状況 key opens the Claude status page', async () => {
+  for (const status of [{ tone: 'normal', title: '正常', detail: '', page: null, line: 'AIの状況：正常' }, { ...OUTAGE, page: 'https://evil.example/' }, null]) {
+    const h = harness({ reads: [{ kind: 'ok', json: status ? withStatus(status) : SNAP }] });
+    await h.plugin.handle(appear('s1', ID + '.status'));
+    await press(h, 's1', 100);
+    assert.deepEqual(h.opened(), ['https://status.claude.com/'], JSON.stringify(status));
+  }
+});
+test('a disconnected AIの状況 key starts the tray app instead of opening a page', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }] });
+  await h.plugin.handle(appear('s1', ID + '.status'));
+  assert.ok(h.images('s1').at(-1).includes('未接続'));
+  await press(h, 's1', 100);
+  assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.opened(), []);
+  assert.ok(h.images('s1').at(-1).includes('起動中'));
 });
 test('identical images are not resent', async () => {
   const h = harness();

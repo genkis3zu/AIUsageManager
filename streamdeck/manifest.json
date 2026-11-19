@@ -1,8 +1,8 @@
 {
   "Name": "AI Usage Manager",
-  "Version": "1.1.3.0",
+  "Version": "1.2.0.0",
   "Author": "AI Usage Manager contributors",
-  "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量を表示します。このプラグイン自身はAIサービスに問い合わせません。",
+  "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量と、AnthropicとOpenAIの障害情報を表示します。このプラグイン自身はインターネットに接続しません。",
   "URL": "https://github.com/genkis3zu/AIUsageManager",
   "UUID": "io.github.genkis3zu.aiusagemanager",
   "CodePath": "bin/plugin.cjs",
@@ -43,6 +43,16 @@
       "Icon": "imgs/action",
       "Controllers": ["Keypad"],
       "PropertyInspectorPath": "ui/settings.html",
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [{ "Image": "imgs/key", "ShowTitle": false }]
+    },
+    {
+      "UUID": "io.github.genkis3zu.aiusagemanager.status",
+      "Name": "AIの状況",
+      "Tooltip": "AnthropicとOpenAIの障害情報と、週の枠のリセットを表示します。押すと障害情報のページを開きます",
+      "Icon": "imgs/action",
+      "Controllers": ["Keypad"],
       "SupportedInMultiActions": false,
       "UserTitleEnabled": false,
       "States": [{ "Image": "imgs/key", "ShowTitle": false }]

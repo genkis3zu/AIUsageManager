@@ -38,6 +38,11 @@ test('setImage sends a base64 SVG data URL', () => {
   s.deck.setImage('ctx', '<svg>日本</svg>');
   assert.deepEqual(s.socket.sent.at(-1), { event: 'setImage', context: 'ctx', payload: { image: 'data:image/svg+xml;base64,' + Buffer.from('<svg>日本</svg>', 'utf8').toString('base64'), target: 0 } });
 });
+test('openUrl asks Stream Deck to open the page in the browser', () => {
+  const s = setup(); s.deck.connect(); s.socket.onopen();
+  s.deck.openUrl('https://status.claude.com/');
+  assert.deepEqual(s.socket.sent.at(-1), { event: 'openUrl', payload: { url: 'https://status.claude.com/' } });
+});
 test('incoming events are emitted by name and bad JSON is ignored', () => {
   const s = setup(), got = []; s.deck.connect(); s.socket.onopen();
   s.deck.on('keyUp', event => got.push(event));

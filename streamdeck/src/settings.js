@@ -1,6 +1,8 @@
 'use strict';
 const PLUGIN = 'io.github.genkis3zu.aiusagemanager';
 const ACTIONS = { [PLUGIN + '.claude']: 'Claude', [PLUGIN + '.codex']: 'Codex', [PLUGIN + '.grok']: 'Grok' };
+// The AIの状況 key (outages and weekly resets) has no settings of its own.
+const STATUS_ACTION = PLUGIN + '.status';
 const STYLES = ['ring', 'vertical', 'horizontal'];
 const METRICS = ['used', 'remaining'];
 const PALETTES = [
@@ -30,4 +32,4 @@ function nextStyle(style) { return nextIn(STYLES, style); }
 function nextPalette(id) { return nextIn(PALETTES.map(p => p.id), id); }
 function paletteFor(id) { return PALETTES.find(p => p.id === id) || PALETTES[0]; }
 
-module.exports = { ACTIONS, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };
+module.exports = { ACTIONS, STATUS_ACTION, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };

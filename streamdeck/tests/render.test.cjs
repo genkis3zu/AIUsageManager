@@ -1,15 +1,15 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { initialConnection, nextConnection } = require('../src/state');
-const { ACTIONS, PALETTES, STYLES, defaultSettings, normalizeKeySettings, nextStyle, nextPalette } = require('../src/settings');
-const { keyView, renderKey } = require('../src/render');
+const { ACTIONS, STATUS_ACTION, PALETTES, STYLES, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor } = require('../src/settings');
+const { keyView, statusView, renderKey } = require('../src/render');
 
 const RECORDED = '2026-11-19T00:00:00.000Z', NOW = Date.parse(RECORDED) + 60000, LATER_RESET = '2026-11-21T00:00:00.000Z';
 const SHAPE = { '5時間': ['5h', '5h'], '週': ['週', 'week'] };
 const win = (label, percent, resetsAt = LATER_RESET) => ({ label, shortLabel: (SHAPE[label] || [label.slice(2, -1), 'week'])[0], span: (SHAPE[label] || [0, 'week'])[1], percent, resetsAt, pace: null, alert: null });
-function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null } = {}) {
+function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null, aiStatus = null } = {}) {
   const service = (name, windows) => ({ name, plan: 'Pro', source, status, needsLogin: needsLogin[name] === true, recordedAt, windows });
-  return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, services: [
+  return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, ...(aiStatus ? { status: aiStatus } : {}), services: [
     service('Claude', claudeWindows ? claudeWindows.map(([label, percent]) => win(label, percent)) : [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
     service('Codex', [win('週', codex, resetsAt)]),
     service('Grok', [win('週', grok, resetsAt)]),
@@ -131,6 +131,44 @@ test('loading and disconnected messages', () => {
   assert.equal(v.kind, 'message'); assert.equal(v.message, '未接続');
 });
 
+const STATUS_PALETTE = 'green';
+const AI = {
+  critical: { tone: 'critical', title: 'Claude 障害', detail: 'Claude Code', page: 'https://status.claude.com/', line: 'Claude 障害（Claude Code）' },
+  warning: { tone: 'warning', title: 'OpenAI 一部不調', detail: 'Codex in ChatGPT Desktop', page: 'https://status.openai.com/', line: 'OpenAI 一部不調（Codex in ChatGPT Desktop）' },
+  reset: { tone: 'reset', title: 'Claude Fable リセット', detail: '週（Fable）', page: null, line: 'Claude 週（Fable） がリセットされました' },
+  normal: { tone: 'normal', title: '正常', detail: '', page: null, line: 'AIの状況：正常' },
+  unknown: { tone: 'unknown', title: '確認できません', detail: '', page: null, line: 'AIの状況：障害情報を確認できません' },
+};
+const statusOf = aiStatus => statusView(connected({ aiStatus }));
+test('status key: company on the first line, what happened on the second', () => {
+  assert.deepEqual([statusOf(AI.critical)].map(v => [v.kind, v.title, v.tone, v.lines, v.detail]), [['status', 'AIの状況', 'critical', ['Claude', '障害'], 'Claude Code']]);
+  assert.deepEqual(statusOf(AI.warning).lines, ['OpenAI', '一部不調']);
+  assert.deepEqual([statusOf(AI.reset)].map(v => [v.tone, v.lines, v.detail]), [['reset', ['Claude', 'Fable リセット'], '週（Fable）']]);
+  assert.deepEqual([statusOf(AI.normal)].map(v => [v.tone, v.lines]), [['normal', ['正常']]]);
+  assert.deepEqual([statusOf(AI.unknown)].map(v => [v.tone, v.lines]), [['unknown', ['確認できません']]]);
+});
+test('status key: loading, 未接続, and a tray app without status', () => {
+  assert.deepEqual([statusView(initialConnection())].map(v => [v.kind, v.title, v.message]), [['loading', 'AIの状況', '読み込み中']]);
+  assert.deepEqual([statusView(nextConnection(initialConnection(), { kind: 'absent' }))].map(v => [v.kind, v.message]), [['message', '未接続']]);
+  assert.deepEqual([statusOf(null)].map(v => [v.kind, v.message]), [['message', '未取得']]);
+});
+test('status key: the headline takes the tone colour and stays inside the key', () => {
+  const p = paletteFor(STATUS_PALETTE);
+  const colours = { critical: p.critical, warning: p.warning, reset: p.accent, normal: p.text, unknown: p.muted };
+  for (const [tone, value] of Object.entries(AI)) {
+    const svg = renderKey(statusOf(value), { palette: STATUS_PALETTE });
+    assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="144" height="144" viewBox="0 0 144 144">/);
+    assert.ok(svg.includes('>AIの状況<'), tone);
+    const last = value.title.split(' ').slice(1).join(' ') || value.title;
+    assert.match(svg, new RegExp(`fill="${colours[tone]}"[^>]*>${last}<`), tone);
+    const sizes = [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
+    assert.ok(Math.min(...sizes) >= 10 && Math.max(...sizes) <= 22, tone + ' ' + sizes);
+  }
+  const long = renderKey(statusOf({ ...AI.critical, title: 'Claude ' + '障害'.repeat(20), detail: 'claude.ai、Claude Code、Claude API (api.anthropic.com)' }), { palette: STATUS_PALETTE });
+  assert.ok(long.includes('…') && !long.includes('障害'.repeat(20)) && !long.includes('api.anthropic.com)'));
+  const escaped = renderKey(statusOf({ ...AI.critical, title: '<b>& 障害', detail: '<i>' }), { palette: STATUS_PALETTE });
+  assert.ok(escaped.includes('&lt;b&gt;&amp;') && escaped.includes('&lt;i&gt;') && !escaped.includes('<b>') && !escaped.includes('<i>'));
+});
 test('state: one failure keeps last values; two disconnect; success resets', () => {
   const first = connected();
   const once = nextConnection(first, { kind: 'failed' });
@@ -165,6 +203,7 @@ test('settings: palettes, styles and actions are fixed', () => {
   assert.deepEqual(PALETTES.map(p => [p.id, p.label]), [['green', '緑'], ['orange', 'オレンジ'], ['blue', '青'], ['violet', '紫'], ['rose', 'ピンク'], ['slate', 'グレー']]);
   assert.deepEqual(STYLES, ['ring', 'vertical', 'horizontal']);
   assert.deepEqual(ACTIONS, { 'io.github.genkis3zu.aiusagemanager.claude': 'Claude', 'io.github.genkis3zu.aiusagemanager.codex': 'Codex', 'io.github.genkis3zu.aiusagemanager.grok': 'Grok' });
+  assert.equal(STATUS_ACTION, 'io.github.genkis3zu.aiusagemanager.status');
 });
 test('settings: style and palette cycle in order and wrap', () => {
   assert.deepEqual([nextStyle('ring'), nextStyle('vertical'), nextStyle('horizontal')], ['vertical', 'horizontal', 'ring']);

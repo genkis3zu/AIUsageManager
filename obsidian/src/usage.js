@@ -7,14 +7,22 @@ const validPath = v => typeof v === 'string' && /^[a-z]:[\\/]/i.test(v) && path.
 function normalizeSettings(v = {}) { return { mode: v.mode === 'compact' ? 'compact' : 'standard', appPath: validPath(v.appPath) ? v.appPath : '' }; }
 // Windows vary by plan (e.g. Claude Ultra has no 5-hour window but a weekly Fable one), so each service carries 0–4.
 const WINDOW_LABEL = /^(5時間|週|週（.{1,24}）)$/u;
+// The tray app's AIの状況 summary is optional: a missing or malformed one is null and the usage values still show.
+// Only the two fixed status pages may pass, because a key press opens the page in the browser.
+const STATUS_TONES = ['critical', 'warning', 'reset', 'normal', 'unknown'];
+const STATUS_PAGES = ['https://status.claude.com/', 'https://status.openai.com/'];
+function parseStatus(v) {
+  if(!v || typeof v!=='object' || Array.isArray(v) || !STATUS_TONES.includes(v.tone)) return null;
+  return {tone:v.tone,title:text(v.title,60),detail:text(v.detail),page:STATUS_PAGES.includes(v.page)?v.page:null,line:text(v.line)};
+}
 function emptyServices() { return names.map(name => ({name, plan:'', source:'', status:'', recordedAt:null, needsLogin:false, windows:[]})); }
 function parseSnapshot(json) {
   if(typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > 65536) throw new Error('Invalid snapshot');
   const value=JSON.parse(json);
   if(!value || value.schemaVersion!==2 || typeof value.connected!=='boolean' || !Array.isArray(value.services)) throw new Error('Invalid snapshot');
-  if(!value.connected) return {connected:false, refreshing:false, services:emptyServices()};
+  if(!value.connected) return {connected:false, refreshing:false, status:null, services:emptyServices()};
   if(value.services.length!==3 || names.some(name=>value.services.filter(s=>s?.name===name).length!==1)) throw new Error('Invalid services');
-  return {connected:true, refreshing:value.refreshing===true, services:names.map(name=> {
+  return {connected:true, refreshing:value.refreshing===true, status:parseStatus(value.status), services:names.map(name=> {
     const s=value.services.find(s=>s.name===name);
     if(!Array.isArray(s.windows) || s.windows.length>4) throw new Error('Invalid windows');
     const seen=new Set();
@@ -54,4 +62,4 @@ function presentService(s,connected,now=Date.now()) {
   const tooltip=[`${s.name} · ${s.plan}`, ...windows.map(w=>`${w.label} ${w.display} / リセット ${w.reset}${w.alert?'\n'+w.alert.title+'\n'+w.alert.detail:w.pace?'\n'+w.pace.detail:''}`),`取得 ${s.recordedAt?new Date(s.recordedAt).toLocaleString():'時刻不明'} · ${s.source}`,state].join('\n');
   return {name:s.name,windows,severity,state,tooltip,stamp:s.recordedAt?stamp(s.recordedAt):'未取得'};
 }
-module.exports={parseSnapshot,presentService,percent,normalizeSettings,validPath,emptyServices};
+module.exports={parseSnapshot,presentService,percent,normalizeSettings,validPath,emptyServices,STATUS_PAGES};
