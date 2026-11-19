@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -25,7 +25,7 @@ namespace AIUsageManager
         public UsageForecaster() : this(null,DateTimeOffset.UtcNow) { }
         public UsageForecaster(string path,DateTimeOffset now) {history=new ForecastHistory(path,now);}
         internal UsageForecaster(ForecastHistory data) {history=data;}
-        public static UsageForecaster Default() {return new UsageForecaster(ForecastHistory.DefaultPath(),DateTimeOffset.UtcNow);}
+        public static UsageForecaster Default() {return new UsageForecaster(new ForecastHistory(ForecastHistory.DefaultPath(),DateTimeOffset.UtcNow,ForecastHistory.LegacyPath()));}
         public bool Save(DateTimeOffset now) {lock(gate)return history.Save(now);}
         public bool Clear() {lock(gate)return history.Clear();}
         public string Status {
@@ -122,7 +122,7 @@ namespace AIUsageManager
                 var series=history.Record(service.Name+"/"+window.Label,service.Plan,new ForecastSample {At=at,Percent=window.Percent.Value,Reset=window.ResetsAt.Value});
                 if(series==null)return null;
                 history.Prune(at);
-                bool weekly=window.Label=="週";var fit=Models(series.Samples,at,weekly);
+                bool weekly=window.Span==UsageSpan.Week;var fit=Models(series.Samples,at,weekly);
                 if(series.Samples.Count<3||fit.Hours<(weekly?24:0.5))return UsagePace.Learning(window,fit.Hours,fit.Days,history.StorageStatus);
                 double[] errors=new double[3],errorWeights=new double[3];int[] counts=new int[3];
                 Backtest(series.Samples,at,weekly,errors,errorWeights,counts);

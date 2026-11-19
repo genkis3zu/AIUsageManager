@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 
 namespace AIUsageManager
@@ -29,17 +30,31 @@ namespace AIUsageManager
     internal sealed class ForecastHistory
     {
         const int MaxBytes=4194304, MaxSamples=6000;
-        readonly string path;
+        readonly string path, legacyPath;
         public string StorageStatus="";
         public readonly Dictionary<string,ForecastSeries> Series=new Dictionary<string,ForecastSeries>();
         static readonly DateTimeOffset Epoch=new DateTimeOffset(1970,1,1,0,0,0,TimeSpan.Zero);
-        public ForecastHistory(string file,DateTimeOffset now) {path=file;if(path!=null)Load(now);}
+        public ForecastHistory(string file,DateTimeOffset now) : this(file,now,null) { }
+        // Older builds discard a history file that contains windows they do not know, so this build keeps its
+        // own file and only reads the older one to carry the learning over. The older file is never written.
+        public ForecastHistory(string file,DateTimeOffset now,string legacyFile)
+        {
+            path=file;legacyPath=legacyFile;
+            if(path==null)return;
+            if(File.Exists(path))Load(path,now);
+            else if(legacyPath!=null&&File.Exists(legacyPath))Load(legacyPath,now);
+        }
         public static string DefaultPath()
+        {return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","forecast-history-2.dat");}
+        public static string LegacyPath()
         {return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","forecast-history.dat");}
+        static readonly Regex KeyPattern=new Regex(@"^(Claude|Codex|Grok)/(5時間|週|週（[A-Za-z0-9 .+\-()]{1,24}）|週（モデル別）)$");
         static bool KnownKey(string key)
-        {return key=="Claude/5時間"||key=="Claude/週"||key=="Codex/週"||key=="Grok/週";}
+        {return key!=null&&KeyPattern.IsMatch(key);}
         internal static string KnownPlan(string plan)
         {
+            // Anthropic renamed Max 20x to Ultra and Max 5x to Max; a rename alone must not restart learning.
+            if(plan=="Max 20x")plan="Ultra";else if(plan=="Max 5x")plan="Max";
             return new[]{"プラン未取得","Max","Max 5x","Max 20x","Pro","Pro Lite","Pro Plus","Plus","Free","Team","Business","Enterprise","Edu","SuperGrok","SuperGrok Plus","SuperGrok Heavy","SuperGrok Lite","Premium","Premium+","Super","Ultra"}.Contains(plan)?plan:"プラン未取得";
         }
         public ForecastSeries Record(string key,string plan,ForecastSample sample)
@@ -69,21 +84,22 @@ namespace AIUsageManager
         }
         static JavaScriptSerializer Serializer()
         {return new JavaScriptSerializer {MaxJsonLength=MaxBytes,RecursionLimit=16};}
-        void Load(DateTimeOffset now)
+        void Load(string source,DateTimeOffset now)
         {
             try {
-                if(!File.Exists(path))return;
+                if(!File.Exists(source))return;
                 byte[] encrypted;
-                using(var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read)) {
+                using(var input=new FileStream(source,FileMode.Open,FileAccess.Read,FileShare.Read)) {
                     if(input.Length>MaxBytes||input.Length<1)throw new InvalidDataException();
                     using(var buffer=new MemoryStream()){input.CopyTo(buffer);encrypted=buffer.ToArray();}
                 }
                 byte[] plain=ProtectedData.Unprotect(encrypted,null,DataProtectionScope.CurrentUser);
                 try {
                     var root=Serializer().DeserializeObject(Encoding.UTF8.GetString(plain)) as Dictionary<string,object>;
-                    if(Json.Number(Json.Get(root,"version"))!=1)throw new InvalidDataException();
+                    var version=Json.Number(Json.Get(root,"version"));
+                    if(version!=1&&version!=2)throw new InvalidDataException();
                     var entries=Json.Get(root,"series") as object[];
-                    if(entries==null||entries.Length>4)throw new InvalidDataException();
+                    if(entries==null||entries.Length>(version==1?4:12))throw new InvalidDataException();
                     foreach(var entry in entries) {
                         var data=entry as Dictionary<string,object>;string key=Json.Str(data,"key"),plan=Json.Str(data,"plan");
                         var rows=Json.Get(data,"samples") as object[];
@@ -111,7 +127,7 @@ namespace AIUsageManager
             try {
                 Prune(now);
                 var entries=Series.Select(pair=>new {key=pair.Key,plan=pair.Value.Plan,samples=pair.Value.Samples.Select(p=>new[]{(p.At-Epoch).TotalSeconds,p.Percent,(p.Reset-Epoch).TotalSeconds}).ToArray()}).ToArray();
-                byte[] plain=Encoding.UTF8.GetBytes(Serializer().Serialize(new {version=1,series=entries}));byte[] encrypted;
+                byte[] plain=Encoding.UTF8.GetBytes(Serializer().Serialize(new {version=2,series=entries}));byte[] encrypted;
                 try {encrypted=ProtectedData.Protect(plain,null,DataProtectionScope.CurrentUser);}finally {Array.Clear(plain,0,plain.Length);}
                 if(encrypted.Length>MaxBytes)throw new InvalidDataException();
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
@@ -125,7 +141,12 @@ namespace AIUsageManager
         public bool Clear()
         {
             Series.Clear();
-            try {if(path!=null){File.Delete(path);File.Delete(path+".tmp");}StorageStatus="";return true;}
+            try {
+                if(path!=null){File.Delete(path);File.Delete(path+".tmp");}
+                // Clearing is the user's request to forget the learning, so the older file goes too.
+                if(legacyPath!=null){File.Delete(legacyPath);File.Delete(legacyPath+".tmp");}
+                StorageStatus="";return true;
+            }
             catch(Exception e){if(!StorageError(e))throw;StorageStatus="保存履歴を削除できませんでした";return false;}
         }
     }

@@ -22,6 +22,18 @@ internal static partial class Tests
         foreach(var p in list)history.Record("Codex/週","Pro Lite",p);
         return history;
     }
+    // Writes a history file in the format older builds use (version 1).
+    static void WriteLegacyHistory(string path,string key,string plan,IEnumerable<ForecastSample> samples)
+    {
+        var epoch=new DateTimeOffset(1970,1,1,0,0,0,TimeSpan.Zero);
+        var rows=samples.Select(p=>new[]{(p.At-epoch).TotalSeconds,p.Percent,(p.Reset-epoch).TotalSeconds}).ToArray();
+        string json=new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new {version=1,series=new[]{new {key=key,plan=plan,samples=rows}}});
+        File.WriteAllBytes(path,System.Security.Cryptography.ProtectedData.Protect(Encoding.UTF8.GetBytes(json),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    }
+    static ServiceUsage ClaudeWindow(UsageWindow window,DateTimeOffset at)
+    {
+        var value=new ServiceUsage{Name="Claude",Plan="Ultra",Source="オンライン",RecordedAt=at};value.Windows.Add(window);return value;
+    }
     static UsagePace Forecast(List<ForecastSample> points)
     {
         var last=points.Last();var model=new UsageForecaster(History(points.Take(points.Count-1)));
@@ -116,6 +128,57 @@ internal static partial class Tests
             var model=new UsageForecaster(loaded);var value=Observed(25,T.AddHours(1),T.AddDays(2));
             Assert(!model.Observe(value,value.Windows[0],T.AddHours(1)).IsLearning);
             Assert(model.Clear()&&!File.Exists(path)&&!File.Exists(path+".tmp")&&loaded.Series.Count==0);
+        });
+        Check("週（Fable） uses weekly forecast rules and 5時間 uses five-hour rules",()=> {
+            var model=new UsageForecaster();UsagePace scoped=null,session=null;
+            for(int i=0;i<=24;i++) {
+                var at=T.AddMinutes(5*i);
+                var fable=ClaudeWindow(UsageWindow.Scoped("Fable",10+i,T.AddDays(3)),at);scoped=model.Observe(fable,fable.Windows[0],at);
+                if(i<=7){var hour=ClaudeWindow(UsageWindow.FiveHour(5+i,T.AddHours(4)),at);session=model.Observe(hour,hour.Windows[0],at);}
+            }
+            Assert(scoped!=null&&scoped.IsLearning&&scoped.Detail.Contains("週の目安"));
+            Assert(session!=null&&!session.IsLearning);
+        });
+        Check("Alerts for 週（Fable） are titled with the full label",()=> {
+            var value=ClaudeWindow(UsageWindow.Scoped("Fable",96,T.AddDays(3)),T);
+            new UsageAlerts().Observe(new[]{value},T,NotificationMode.All);
+            Assert(value.Windows[0].Alert!=null&&value.Windows[0].Alert.Title.StartsWith("週（Fable）："));
+        });
+        Check("History seeds from the legacy file and keeps learning after the Ultra rename",()=> {
+            var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");
+            var points=Routine(T.AddDays(-5),120,t=>0.2);
+            WriteLegacyHistory(legacy,"Claude/週","Max 20x",points);
+            var history=new ForecastHistory(current,T,legacy);
+            Assert(history.Series["Claude/週"].Plan=="Ultra"&&history.Series["Claude/週"].Samples.Count==points.Count);
+            history.Record("Claude/週","Ultra",new ForecastSample{At=T.AddHours(1),Percent=points.Last().Percent+1,Reset=points.Last().Reset});
+            Assert(history.Series["Claude/週"].Samples.Count==points.Count+1);
+            Assert(ForecastHistory.KnownPlan("Max 5x")=="Max"&&ForecastHistory.KnownPlan("Max 20x")=="Ultra");
+        });
+        Check("Saving never writes the legacy history file",()=> {
+            var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");
+            WriteLegacyHistory(legacy,"Claude/週","Max 20x",Routine(T.AddDays(-2),48,t=>0.2));
+            byte[] before=File.ReadAllBytes(legacy);var stamp=File.GetLastWriteTimeUtc(legacy);
+            var history=new ForecastHistory(current,T,legacy);
+            history.Record("Claude/週（Fable）","Ultra",new ForecastSample{At=T.AddMinutes(5),Percent=40,Reset=T.AddDays(3)});
+            Assert(history.Save(T.AddMinutes(5))&&File.Exists(current));
+            Assert(File.ReadAllBytes(legacy).SequenceEqual(before)&&File.GetLastWriteTimeUtc(legacy)==stamp);
+            string saved=Encoding.UTF8.GetString(System.Security.Cryptography.ProtectedData.Unprotect(File.ReadAllBytes(current),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));
+            Assert(saved.Contains("\"version\":2"));
+        });
+        Check("New window keys survive save and load, unsafe names are rejected",()=> {
+            var path=Path.Combine(Fixture(),"forecast-history-2.dat");var history=new ForecastHistory(path,T);
+            var sample=new ForecastSample{At=T,Percent=10,Reset=T.AddDays(3)};
+            Assert(history.Record("Claude/週（Fable）","Ultra",sample)!=null&&history.Record("Codex/5時間","Plus",sample)!=null&&history.Record("Claude/週（モデル別）","Max",sample)!=null);
+            Assert(history.Record("Claude/週（<script>）","Ultra",sample)==null&&history.Record("Other/週","Ultra",sample)==null);
+            Assert(history.Save(T));
+            var loaded=new ForecastHistory(path,T);
+            Assert(loaded.Series.ContainsKey("Claude/週（Fable）")&&loaded.Series.ContainsKey("Codex/5時間")&&loaded.Series.ContainsKey("Claude/週（モデル別）"));
+        });
+        Check("Clear deletes both history files",()=> {
+            var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");
+            WriteLegacyHistory(legacy,"Claude/週","Max 20x",Routine(T.AddDays(-2),48,t=>0.2));
+            var history=new ForecastHistory(current,T,legacy);Assert(history.Save(T));
+            Assert(history.Clear()&&!File.Exists(current)&&!File.Exists(legacy));
         });
         Check("Corrupt and oversized saved data fail safely without echoing contents",()=> {
             var path=Path.Combine(Fixture(),"forecast-history.dat");File.WriteAllText(path,"private-fixture");

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 
 namespace AIUsageManager
@@ -38,7 +38,7 @@ namespace AIUsageManager
         {
             return new UsagePace {IsLearning=true,Summary="学習中 · 観測"+Number(hours)+"時間",TargetText="予測は学習中",
                 Detail="現在"+Number(window.Percent.GetValueOrDefault())+"%。予測は学習中（観測"+days+"日・"+Number(hours)+"時間）。\n"+
-                (window.Label=="週"?"週の目安には24時間分以上の観測が必要です。":"目安には30分以上・3回以上の観測が必要です。")+
+                (window.Span==UsageSpan.Week?"週の目安には24時間分以上の観測が必要です。":"目安には30分以上・3回以上の観測が必要です。")+
                 "休止時間も含めて傾向を学びます。"+(string.IsNullOrEmpty(storage)?"":"\n"+storage)};
         }
         static string Range(int target,double percent,double low,double high,DateTimeOffset at)
@@ -56,10 +56,10 @@ namespace AIUsageManager
             pace.At90=Target(90,percent,rate,at);pace.At95=Target(95,percent,rate,at);pace.At100=Target(100,percent,rate,at);
             pace.TargetText=Range(next,percent,low,high,at);
             pace.Summary=(count>=3?"":"学習中 · ")+pace.TargetText+(count>=3?" · 実績で補正":"");
-            string unit=window.Label=="週"?"日":"時間";
+            string unit=window.Span==UsageSpan.Week?"日":"時間";
             var central=next==90?pace.At90:next==95?pace.At95:pace.At100;
             if(central.HasValue&&window.ResetsAt.HasValue&&central>=window.ResetsAt)pace.Summary+="・リセットが先";
-            pace.Detail="現在"+Number(percent)+"%。履歴"+days+"日・観測"+Number(hours)+"時間。推定 +"+Number(rate*(window.Label=="週"?24:1))+"ポイント/"+unit+"\n"+
+            pace.Detail="現在"+Number(percent)+"%。履歴"+days+"日・観測"+Number(hours)+"時間。推定 +"+Number(rate*(window.Span==UsageSpan.Week?24:1))+"ポイント/"+unit+"\n"+
                 Range(90,percent,low,high,at)+" / "+Range(95,percent,low,high,at)+"\n"+
                 Milestone(100,percent,pace.At100,at,window.ResetsAt)+"。目安幅は過去の誤差と推定方法の差から算出。\n"+
                 "検証"+count+"件："+Number(horizon)+"時間先の平均誤差 "+(count>0?Number(error)+"ポイント":"未評価")+
