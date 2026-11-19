@@ -79,6 +79,7 @@ struct Provider:winrt::implements<Provider,P::IWidgetProvider>
     {
         if(args.Verb()==L"refresh")Queue(args.WidgetContext());
         else if(args.Verb()==L"open")OpenTray();
+        else if(args.Verb()==L"login-claude")OpenTray(L"--login-claude");
         else if(args.Verb()==L"login-codex")OpenTray(L"--login-codex");
         else if(args.Verb()==L"login-grok")OpenTray(L"--login-grok");
     }

@@ -34,7 +34,9 @@ namespace AIUsageManager
         readonly SnapshotServer snapshots;
         readonly RegisteredWaitHandle refreshWait;
         ServiceUsage[] latest=WidgetCards.Unavailable();
-        readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[2];
+        // Order matches the login signals Program passes in: Claude, Codex, Grok.
+        static readonly string[] LoginServices = {"Claude","Codex","Grok"};
+        readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[3];
         ThemeMode themeMode;
         NotificationMode notificationMode;
         bool refreshing, exiting, loggingIn, clearingHistory;
@@ -62,7 +64,7 @@ namespace AIUsageManager
             tray.BalloonTipClicked+=(s,e)=>ShowPopup();
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
             menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
-            foreach(string name in new[]{"Codex","Grok"}) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
+            foreach(string name in LoginServices) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
             menu.Items.Add(loginMenu);
             AddThemeChoice("Windowsに合わせる",ThemeMode.System);
             AddThemeChoice("ライト",ThemeMode.Light);
@@ -94,8 +96,8 @@ namespace AIUsageManager
             };
             popup.RefreshRequested+=async(s,e)=>await RefreshUsage();
             popup.LoginRequested+=async name=>await Login(name);
-            if(loginSignals!=null)for(int i=0;i<loginWaits.Length;i++) {
-                string name=i==0?"Codex":"Grok";
+            if(loginSignals!=null)for(int i=0;i<Math.Min(loginWaits.Length,loginSignals.Length);i++) {
+                string name=LoginServices[i];
                 loginWaits[i]=ThreadPool.RegisterWaitForSingleObject(loginSignals[i],(state,timedOut)=> {
                     try { if(!exiting)popup.BeginInvoke(new Action(async()=>await Login(name))); }catch(InvalidOperationException){}
                 },null,Timeout.Infinite,false);

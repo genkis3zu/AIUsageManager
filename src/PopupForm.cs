@@ -19,13 +19,15 @@ namespace AIUsageManager
             set
             {
                 usage=value;
-                login.Visible=value.NeedsLogin&&(value.Name=="Codex"||value.Name=="Grok");
+                login.Visible=ShowsLogin(value);
                 login.AccessibleName=value.Name+" にログイン";
                 AccessibleName=value.Name+" "+value.Plan+" "+string.Join("、",value.Windows.Select(w=>w.Label+" "+UsageText.Percent(w.Percent)+" "+UsageText.Reset(w,DateTimeOffset.Now)));
                 AccessibleDescription=Stamp(value)+" "+value.Status+" "+value.PlanNote+" "+string.Join("。",UsageAlerts.ForDisplay(value,DateTimeOffset.Now).Select(a=>a.Title+"。"+a.Detail));
                 Invalidate();
             }
         }
+        // Each service's official CLI handles its own login (Claude: claude auth login, Codex: codex login, Grok: grok login).
+        internal static bool ShowsLogin(ServiceUsage value) { return value.NeedsLogin&&(value.Name=="Claude"||value.Name=="Codex"||value.Name=="Grok"); }
         // Full names fit two columns; with three or more windows the short names (5h, 週, Fable) are used.
         internal static string Caption(UsageWindow window,int count) { return count>=3?window.ShortLabel:window.Label; }
         public UsageRow() {

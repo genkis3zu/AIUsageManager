@@ -49,6 +49,11 @@ internal static partial class Tests
             Assert(large.Contains("\"text\":\"週（Fable）  70%")&&medium.Contains("\"text\":\"Fable  70%")&&!medium.Contains("\"text\":\"週（Fable）")&&medium.Contains("週（Fable） 70%")&&!large.Contains("5時間"));
         });
         Check("Widget bar width follows the window count",()=>Assert(WidgetCards.BarWidth(1)==360&&WidgetCards.BarWidth(2)==180&&WidgetCards.BarWidth(3)==120&&WidgetCards.BarWidth(0)==360));
+        Check("Widget offers Claude login only when Claude needs it",()=> {
+            var values=WidgetValues();values[0].NeedsLogin=true;
+            Assert(WidgetCards.Create(values,T).Contains("\"verb\":\"login-claude\"")&&WidgetCards.Create(values,T).Contains("Claude ログイン"));
+            values[0].NeedsLogin=false;Assert(!WidgetCards.Create(values,T).Contains("login-claude"));
+        });
         Check("Widget high usage uses attention text",()=>Assert(WidgetCards.Create(WidgetValues(),T).Contains("\"color\":\"attention\"")));
         Check("Widget keeps original observation time",()=> {
             string json=WidgetCards.Create(WidgetValues(),T);Assert(json.Contains(T.AddHours(-1).ToLocalTime().ToString("MM/dd HH:mm"))&&json.Contains("CLI 記録"));

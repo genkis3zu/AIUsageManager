@@ -88,6 +88,9 @@ internal static class UiTests
                 var authMissing=ServiceUsage.Empty("Grok","ログインが必要です");authMissing.NeedsLogin=true;
                 row.Usage=authMissing;
                 Assert(row.Controls.OfType<Button>().Any(b=>b.Text.Contains("ログイン")),"Authentication failure exposes a login button");
+                var claudeNeeds=ServiceUsage.Empty("Claude","Claude Code で再ログインが必要です");claudeNeeds.NeedsLogin=true;
+                Assert(UsageRow.ShowsLogin(claudeNeeds)&&UsageRow.ShowsLogin(authMissing)&&!UsageRow.ShowsLogin(ServiceUsage.Empty("Claude","")),"Login button appears for Claude, Codex and Grok when login is needed");
+                Assert(Program.LoginService(new[]{"--login-claude"})=="Claude"&&Program.LoginService(new[]{"--login-codex"})=="Codex"&&Program.LoginService(new[]{"--login-grok"})=="Grok"&&Program.LoginService(new[]{"--login-other"})==null&&Program.LoginService(new[]{"--login-claude","x"})==null,"Start arguments request login only for the three known services");
                 var three=new ServiceUsage{Name="Claude",Plan="Max",Source="オンライン",RecordedAt=DateTimeOffset.Now};
                 three.Windows.Add(UsageWindow.FiveHour(10,DateTimeOffset.Now.AddHours(3)));three.Windows.Add(UsageWindow.Week(20,DateTimeOffset.Now.AddDays(3)));three.Windows.Add(UsageWindow.Scoped("Fable",96,DateTimeOffset.Now.AddDays(3)));
                 var paintRow=new UsageRow{Width=388,Height=110};paintRow.Usage=three;
@@ -152,6 +155,7 @@ internal static class UiTests
                 row.Controls.OfType<Button>().Single().PerformClick();
                 Assert(Pump(()=>login.Calls==1)&&login.Service=="Grok"&&!popup.Visible,"Login button starts official authentication for its service");
                 var loginMenu=Field<ToolStripMenuItem>(context,"loginMenu");
+                Assert(string.Join("|",loginMenu.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text))=="Claude にログイン|Codex にログイン|Grok にログイン","Login menu lists Claude, Codex and Grok");
                 loginMenu.DropDownItems[0].PerformClick();Application.DoEvents();Assert(login.Calls==1,"Login launches cannot overlap");
                 login.Pending.SetResult(null);Assert(Pump(()=>source.Calls==4),"OAuth completion automatically refreshes usage");
                 source.Complete();Assert(Pump(()=>popup.Visible&&loginMenu.Enabled),"Completed login restores popup and controls");

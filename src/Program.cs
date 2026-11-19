@@ -21,6 +21,12 @@ namespace AIUsageManager
 {
     internal static class Program
     {
+        // --login-claude / --login-codex / --login-grok start that service's official login.
+        internal static string LoginService(string[] args)
+        {
+            if(args==null||args.Length!=1)return null;
+            switch(args[0]) { case "--login-claude": return "Claude"; case "--login-codex": return "Codex"; case "--login-grok": return "Grok"; default: return null; }
+        }
         [STAThread]
         static void Main(string[] args)
         {
@@ -50,16 +56,18 @@ namespace AIUsageManager
             bool created;
             using(var mutex=new Mutex(true,"Local\\AIUsageManager.Instance."+user,out created))
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Show."+user))
+            using(var claudeLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Claude."+user))
             using(var codexLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Codex."+user))
             using(var grokLogin=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Login.Grok."+user))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset,"Local\\AIUsageManager.Refresh."+user))
             {
-                bool loginCodex=args.Length==1&&args[0]=="--login-codex", loginGrok=args.Length==1&&args[0]=="--login-grok";
-                if(loginCodex)codexLogin.Set();else if(loginGrok)grokLogin.Set();
+                // A second instance only signals the running one; the first instance picks the signal up after start.
+                string login=LoginService(args);
+                if(login=="Claude")claudeLogin.Set();else if(login=="Codex")codexLogin.Set();else if(login=="Grok")grokLogin.Set();
                 bool refresh=args.Length==1&&args[0]=="--refresh";
-                if(!created){if(refresh)refreshSignal.Set();else if(!loginCodex&&!loginGrok)signal.Set();return;}
+                if(!created){if(refresh)refreshSignal.Set();else if(login==null)signal.Set();return;}
                 AppLocation.Save(AppLocation.DefaultPath(),Application.ExecutablePath);
-                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{codexLogin,grokLogin},null,snapshots,refreshSignal));}
+                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal));}
                 finally {mutex.ReleaseMutex();}
             }
         }

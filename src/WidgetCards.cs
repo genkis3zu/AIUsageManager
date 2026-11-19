@@ -72,7 +72,7 @@ namespace AIUsageManager
         static object Card(ServiceUsage[] values,DateTimeOffset now,bool large)
         {
             var actions=new List<object>{O("type","Action.Execute","title","更新","verb","refresh")};
-            foreach(var value in values.Where(v=>v.NeedsLogin&&(v.Name=="Codex"||v.Name=="Grok")))
+            foreach(var value in values.Where(v=>v.NeedsLogin&&(v.Name=="Claude"||v.Name=="Codex"||v.Name=="Grok")))
                 actions.Add(O("type","Action.Execute","title",value.Name+" ログイン","verb","login-"+value.Name.ToLowerInvariant()));
             if(actions.Count==1)actions.Add(O("type","Action.Execute","title","アプリを開く","verb","open"));
             return O("$schema","http://adaptivecards.io/schemas/adaptive-card.json","type","AdaptiveCard","version","1.5",
