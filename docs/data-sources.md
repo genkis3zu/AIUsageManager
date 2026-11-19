@@ -4,21 +4,25 @@
 
 既存Claude Codeログインで使用量を取得します。失敗時は、存在する `usage-cache.json` を読みます。キャッシュ生成やステータスライン登録はしません。
 
-トップレベル `five_hour` / `seven_day` の `utilization`、または `rate_limits.five_hour` / `rate_limits.seven_day` の `used_percentage` を受け付けます。各枠の `resets_at` をリセット日時に使います。キャッシュの観測時刻は `timestamp` / `fetched_at` / `updated_at`。時刻がなければ「取得時刻不明」です。
+応答の `limits` 配列から枠を作ります。`kind` が `session` の項目は「5時間」、`weekly_all` は「週」、`weekly_scoped` は「週（モデル名）」（例「週（Fable）」、モデル名は `scope.model.display_name`）です。割合は `percent`、リセット日時は `resets_at` を使います。知らない `kind`、割合が不正な項目、`is_active`・`group`・`severity` は使いません。同じ枠が2つあるときは割合の高いほうを使います。
+
+`limits` に5時間または週の枠がないときは、トップレベル `five_hour` / `seven_day` の `utilization`、または `rate_limits.five_hour` / `rate_limits.seven_day` の `used_percentage` で補います。取得先が返さなかった枠は表示しません。モデル名は英数字と一部の記号だけを残し、24文字までにします。
+
+プラン名は、内部名 `max` と `20x` を含む契約を「Ultra」（旧Max 20x）、それ以外の `max` を「Max」と表示します。キャッシュの観測時刻は `timestamp` / `fetched_at` / `updated_at`。時刻がなければ「取得時刻不明」です。
 
 ## Codex
 
-既存ChatGPTログインの `.codex/auth.json` を読み、Codexと同じ `chatgpt.com/backend-api/wham/usage` に問い合わせます。`rate_limit.primary_window` / `secondary_window` のうち `limit_window_seconds = 604800` を週枠として選び、`used_percent` と `reset_at` を表示します。コードレビュー用などの別枠は混ぜません。APIキー認証モードのときは、残っているChatGPTトークンを送信しません。
+既存ChatGPTログインの `.codex/auth.json` を読み、Codexと同じ `chatgpt.com/backend-api/wham/usage` に問い合わせます。`rate_limit.primary_window` / `secondary_window` のうち、`limit_window_seconds = 18000` を5時間、`604800` を週の枠として、`used_percent` と `reset_at` を表示します。Pro系のプランは週の枠だけ、Plusなどは5時間と週の枠が返ります。コードレビュー用などの別枠は混ぜません。APIキー認証モードのときは、残っているChatGPTトークンを送信しません。
 
-オンライン応答に週枠・割合がなければ未取得とし、古いログで置き換えません。通信・認証に失敗した場合だけ、以下の保存ログを使います。取得失敗の理由と元の記録時刻を保持します。
+オンライン応答にどちらの枠の割合もなければ未取得とし、古いログで置き換えません。通信・認証に失敗した場合だけ、以下の保存ログを使います。取得失敗の理由と元の記録時刻を保持します。
 
-セッションの `event_msg` / `token_count` を対象に、最後の有効な `rate_limits` を読みます。`limit_id` が `codex` または省略された記録から、`primary` / `secondary` の `window_minutes = 10080` を週枠として選びます。
+セッションの `event_msg` / `token_count` を対象に、最後の有効な `rate_limits` を読みます。`limit_id` が `codex` または省略された記録から、`primary` / `secondary` の `window_minutes = 300` を5時間、`10080` を週の枠として読みます。
 
 更新日時が新しい最大64ファイルを調べ、各ファイル末尾の最大32 MiBを逆順に読みます。各ファイルで見つかった値のうち、観測時刻が最新の記録を採用します。古いセッションへ追記されても、古い使用量に戻りません。1 MiB超の行と壊れたJSON行は読み飛ばします。探索範囲に値がなければ未取得です。
 
 ## Grok
 
-既存Grok Build CLIログインで請求情報を取得します。Grok Botの別枠は取得しません。ログイン未設定・期限切れ・HTTP 401や通信失敗時は、使用量を未取得とし、古いCLIログの割合へ戻しません。期限切れ・HTTP 401では「ログイン」ボタンを表示し、HTTP 403はアクセス拒否として区別します。
+既存Grok Build CLIログインで請求情報を取得します。Grok Bot（Premium以上）も同じ週の枠を使うため、割合にはGrok Botの利用も含まれます。ログイン未設定・期限切れ・HTTP 401や通信失敗時は、使用量を未取得とし、古いCLIログの割合へ戻しません。期限切れ・HTTP 401では「ログイン」ボタンを表示し、HTTP 403はアクセス拒否として区別します。
 
 `config.creditUsagePercent` と `config.currentPeriod` を読み、週の期間であることを確認します。APIから正常な応答があっても週枠がなければ未取得とし、古い週枠を復活させません。JSON応答で割合が省略されただけでは0%とは推定しません。
 
@@ -52,3 +56,10 @@
 2026-10-15時点で確認した公開資料では、[AnthropicのUsage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api)はAPI組織用で個人アカウントには提供されず、[OpenAIのUsage API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage)も組織のAPI使用量を扱います。[xAIの履歴API](https://docs.x.ai/developers/rest-api-reference/management/billing)もAPI使用量の履歴で、[The X Subscriptionの使用量](https://docs.x.ai/x-subscription/manage)はダッシュボードで確認する案内です。
 
 このアプリで表示している個人サブスクの上限率と対応付けられる履歴取得方法は、上記資料では確認できていません。APIのトークン数や費用をサブスクの上限率に換算せず、現在の取得先が返した使用率を継続記録して学習します。追加の管理者キーを求めたり、未確認の取得先へ既存ログインを送信したりはしません。
+
+## 各サービスの使用枠（2026-11-19確認）
+
+- Claude：Max 20xは「Ultra」に名前が変わり、認証済みのUltraには5時間の制限がありません。Ultraには全モデル共通の週の制限と、Fable専用の週の制限があります。Maxは5時間・週・Fableの週、Proは5時間と週の制限です（[Ultraプラン](https://support.claude.com/en/articles/17728952-what-is-the-ultra-plan)、[Maxプラン](https://support.claude.com/en/articles/11049741-what-is-the-max-plan)、[料金](https://claude.com/pricing)）。取得先の `limits` 配列の形は、利用者の許可を得て実データで確認しました。
+- Codex：Pro系のプランには5時間の制限がなく、Plusには5時間の制限があります（[Codex Pricing](https://developers.openai.com/codex/pricing)）。
+- Grok：有料契約ごとに週の枠が1つあり、Grokの各製品・Cursor・Grok Botで共有します（[Usage limits](https://docs.x.ai/x-subscription/usage-limits)、[Grok Bot](https://docs.x.ai/x-subscription/grok-bot)）。
+- 各社の仕様は予告なく変わります。表示と契約画面が違う場合は、契約画面を優先してください。

@@ -16,7 +16,7 @@ jobs:
       - name: Test and build Obsidian plugin
         shell: powershell
         run: |
-          node --test obsidian/tests/usage.test.cjs obsidian/tests/bridge.test.cjs
+          node --test obsidian/tests/usage.test.cjs obsidian/tests/bridge.test.cjs obsidian/tests/toolbar.test.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Obsidian tests failed' }
           node tools/build-obsidian.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Obsidian build failed' }
