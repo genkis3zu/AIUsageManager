@@ -73,6 +73,14 @@ internal static partial class Tests
             var r = UsageParser.Claude("{}", "max", T, "API");
             Assert(Labels(r) == "週" && !r.HasData && r.Status == "使用量を取得できません");
         });
+        Check("Tray summary names each window", () => {
+            var claude = new ServiceUsage { Name = "Claude" }; claude.Windows.Add(UsageWindow.Week(74, T)); claude.Windows.Add(UsageWindow.Scoped("Fable", 91, T));
+            var codex = ServiceUsage.Empty("Codex", ""); codex.Windows[0].Percent = 84;
+            var grok = ServiceUsage.Empty("Grok", "");
+            Assert(UsageText.Summary(new[] { claude, codex, grok }) == "Claude 週74%/Fable91% | Codex 週84% | Grok 週未取得");
+            var max = new ServiceUsage { Name = "Claude" }; max.Windows.Add(UsageWindow.FiveHour(10, T)); max.Windows.Add(UsageWindow.Week(20, T)); max.Windows.Add(UsageWindow.Scoped("ABCDEFGHIJKLMNOPQRSTUVWXYZ", 30, T));
+            Assert(UsageText.Summary(new[] { max, codex, grok }).Length <= 63);
+        });
         Check("Claude plan names follow Ultra and Max", () => {
             Assert(Json.Plan("max", "default_claude_max_20x") == "Ultra" && Json.Plan("max", "default_claude_max_5x") == "Max");
             Assert(Json.Plan("max", null) == "Max" && Json.Plan("ultra", null) == "Ultra" && Json.Plan("pro", null) == "Pro");

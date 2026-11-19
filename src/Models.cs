@@ -63,6 +63,13 @@ namespace AIUsageManager
     }
     public static class UsageText
     {
+        // Tray icon tooltip (Windows cuts it at 63 characters). Each value carries its window name,
+        // because the set of windows depends on the plan (e.g. Ultra: 週 and Fable).
+        public static string Summary(IEnumerable<ServiceUsage> values)
+        {
+            string text = string.Join(" | ", values.Select(v => v.Name + " " + string.Join("/", v.Windows.Select(w => w.ShortLabel + Percent(w.Percent)))));
+            return text.Length > 63 ? text.Substring(0, 63) : text;
+        }
         public static string Percent(double? value)
         { return value.HasValue ? value.Value.ToString("0.#", CultureInfo.InvariantCulture) + "%" : "未取得"; }
         public static string Reset(UsageWindow window, DateTimeOffset now)

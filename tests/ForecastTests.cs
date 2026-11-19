@@ -174,6 +174,23 @@ internal static partial class Tests
             var loaded=new ForecastHistory(path,T);
             Assert(loaded.Series.ContainsKey("Claude/週（Fable）")&&loaded.Series.ContainsKey("Codex/5時間")&&loaded.Series.ContainsKey("Claude/週（モデル別）"));
         });
+        Check("History keeps at most twelve windows and never drops the fixed ones",()=> {
+            var path=Path.Combine(Fixture(),"forecast-history-2.dat");var history=new ForecastHistory(path,T);
+            var weekly=Routine(T.AddDays(-3),72,t=>0.2);foreach(var p in weekly)history.Record("Claude/週","Ultra",p);
+            foreach(string key in new[]{"Claude/5時間","Codex/5時間","Codex/週","Grok/週"})history.Record(key,"Ultra",new ForecastSample{At=T.AddMinutes(-30),Percent=5,Reset=T.AddDays(3)});
+            for(int i=0;i<10;i++)Assert(history.Record("Claude/週（M"+i+"）","Ultra",new ForecastSample{At=T.AddMinutes(-20+i),Percent=i,Reset=T.AddDays(3)})!=null);
+            Assert(history.Series.Count==12&&history.Series["Claude/週"].Samples.Count==weekly.Count);
+            Assert(!history.Series.ContainsKey("Claude/週（M0）")&&!history.Series.ContainsKey("Claude/週（M2）")&&history.Series.ContainsKey("Claude/週（M3）")&&history.Series.ContainsKey("Claude/週（M9）"));
+            Assert(new[]{"Claude/5時間","Claude/週","Codex/5時間","Codex/週","Grok/週"}.All(history.Series.ContainsKey));
+            Assert(history.Save(T));var loaded=new ForecastHistory(path,T);
+            Assert(loaded.Series.Count==12&&loaded.Series["Claude/週"].Samples.Count==weekly.Count&&loaded.StorageStatus=="");
+        });
+        Check("Pruning removes windows whose samples are all gone",()=> {
+            var history=new ForecastHistory(null,T);
+            history.Record("Claude/週（Old）","Ultra",new ForecastSample{At=T.AddDays(-100),Percent=10,Reset=T.AddDays(-97)});
+            history.Record("Claude/週","Ultra",new ForecastSample{At=T,Percent=10,Reset=T.AddDays(3)});
+            history.Prune(T);Assert(!history.Series.ContainsKey("Claude/週（Old）")&&history.Series.ContainsKey("Claude/週"));
+        });
         Check("Clear deletes both history files",()=> {
             var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");
             WriteLegacyHistory(legacy,"Claude/週","Max 20x",Routine(T.AddDays(-2),48,t=>0.2));

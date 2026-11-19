@@ -199,8 +199,7 @@ namespace AIUsageManager
                 if(exiting)return;
                 latest=result;
                 popup.SetUsage(result);
-                string summary=string.Join(" | ",result.Select(r=>r.Name+" "+string.Join("/",r.Windows.Select(w=>UsageText.Percent(w.Percent)))));
-                tray.Text=summary.Length>63?summary.Substring(0,63):summary;
+                tray.Text=UsageText.Summary(result);
                 // OS notification delivery must never turn a successful fetch into an error.
                 if(notices.Length>0)try { notify(UsageAlerts.NotificationText(notices)); }catch(Exception) { }
             }

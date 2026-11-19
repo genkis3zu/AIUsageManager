@@ -29,7 +29,9 @@ namespace AIUsageManager
     }
     internal sealed class ForecastHistory
     {
-        const int MaxBytes=4194304, MaxSamples=6000;
+        const int MaxBytes=4194304, MaxSamples=6000, MaxSeries=12;
+        // Windows every build knows; they are never evicted to make room for per-model windows.
+        static readonly string[] FixedKeys={"Claude/5時間","Claude/週","Codex/5時間","Codex/週","Grok/週"};
         readonly string path, legacyPath;
         public string StorageStatus="";
         public readonly Dictionary<string,ForecastSeries> Series=new Dictionary<string,ForecastSeries>();
@@ -60,6 +62,15 @@ namespace AIUsageManager
         public ForecastSeries Record(string key,string plan,ForecastSample sample)
         {
             if(!KnownKey(key))return null;
+            // Per-model names come from the service, so the key set is open-ended. Stay within what Load accepts
+            // by evicting the per-model window seen least recently; never fail the whole file.
+            if(!Series.ContainsKey(key)&&Series.Count>=MaxSeries) {
+                string oldest=Series.Where(p=>Array.IndexOf(FixedKeys,p.Key)<0)
+                    .OrderBy(p=>p.Value.Samples.Count==0?DateTimeOffset.MinValue:p.Value.Samples[p.Value.Samples.Count-1].At)
+                    .Select(p=>p.Key).FirstOrDefault();
+                if(oldest==null)return null;
+                Series.Remove(oldest);
+            }
             ForecastSeries series;
             plan=KnownPlan(plan);
             if(!Series.TryGetValue(key,out series)||(plan!="プラン未取得"&&series.Plan!=plan)) {
@@ -81,6 +92,8 @@ namespace AIUsageManager
                 }
                 if(points.Count>MaxSamples)points.RemoveRange(0,points.Count-MaxSamples);
             }
+            // A window that has not been seen for 90 days (e.g. a renamed model) leaves the history.
+            foreach(string key in Series.Where(p=>p.Value.Samples.Count==0).Select(p=>p.Key).ToList())Series.Remove(key);
         }
         static JavaScriptSerializer Serializer()
         {return new JavaScriptSerializer {MaxJsonLength=MaxBytes,RecursionLimit=16};}
