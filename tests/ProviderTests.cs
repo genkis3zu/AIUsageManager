@@ -71,6 +71,34 @@ internal static partial class Tests
             try { LoginLauncher.StartInfo("Grok & injected",root,root,null); } catch(ArgumentException) { rejected=true; }
             Assert(rejected && LoginLauncher.StartInfo("Grok",root,root,".;relative;C:relative")==null);
         });
+        Check("Claude login launches claude.exe auth login from the installer folder or an absolute PATH entry", () => {
+            var root=Fixture();var bin=Path.Combine(root,".local","bin");Directory.CreateDirectory(bin);File.WriteAllText(Path.Combine(bin,"claude.exe"),"fixture");
+            var start=LoginLauncher.StartInfo("Claude",root,root,null);
+            Assert(start!=null && start.FileName==Path.Combine(bin,"claude.exe") && start.Arguments=="auth login --claudeai" && start.WorkingDirectory==root && start.UseShellExecute && !start.RedirectStandardOutput && !start.RedirectStandardError);
+            var other=Fixture();var tools=Path.Combine(other,"tools");Directory.CreateDirectory(tools);
+            File.WriteAllText(Path.Combine(tools,"claude.exe"),"fixture");File.WriteAllText(Path.Combine(tools,"claude.cmd"),"must not execute a shell");
+            var viaPath=LoginLauncher.StartInfo("Claude",other,other,"relative;"+tools);
+            Assert(viaPath!=null && viaPath.FileName==Path.Combine(tools,"claude.exe") && viaPath.Arguments=="auth login --claudeai");
+            Assert(LoginLauncher.StartInfo("Claude",Fixture(),root,"relative;.;C:relative")==null);
+        });
+        Check("Claude needs login without credentials, with an expired token, or after HTTP 401", () => {
+            var none=Fixture();
+            using(var http=new HttpClient(new FakeHttp())) Assert(new UsageService(none,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0].NeedsLogin);
+            var expired=Fixture();File.WriteAllText(Path.Combine(expired,".claude",".credentials.json"),"{\"claudeAiOauth\":{\"accessToken\":\"fixture-claude\",\"expiresAt\":1000}}");
+            using(var http=new HttpClient(new FakeHttp())) {var value=new UsageService(expired,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(value.NeedsLogin && value.Status.Contains("再ログイン"));}
+            var denied=Fixture();Auth(denied);
+            using(var http=new HttpClient(new FakeHttp{Status=HttpStatusCode.Unauthorized})) Assert(new UsageService(denied,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0].NeedsLogin);
+        });
+        Check("Claude 401 with a saved cache keeps cached values and still offers login", () => {
+            var root=Fixture();Auth(root);File.WriteAllText(Path.Combine(root,".claude","usage-cache.json"),"{\"timestamp\":\"2026-10-10T09:00:00Z\",\"rate_limits\":{\"seven_day\":{\"used_percentage\":9}}}");
+            using(var http=new HttpClient(new FakeHttp{Status=HttpStatusCode.Unauthorized})) {var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(value.Windows[0].Percent==9 && value.NeedsLogin);}
+        });
+        Check("Claude rate limits, refusals and server errors do not ask for login", () => {
+            foreach(var status in new[]{(HttpStatusCode)429,HttpStatusCode.Forbidden,HttpStatusCode.InternalServerError}) {
+                var root=Fixture();Auth(root);
+                using(var http=new HttpClient(new FakeHttp{Status=status})) Assert(!new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0].NeedsLogin);
+            }
+        });
         Check("Codex npm installation launches its bundled native CLI", () => {
             foreach(string layout in new[]{"node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin","node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin"}) {
                 var root=Fixture();var prefix=Path.Combine(root,"npm");var native=Path.Combine(prefix,layout);Directory.CreateDirectory(native);

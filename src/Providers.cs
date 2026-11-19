@@ -206,6 +206,8 @@ namespace AIUsageManager
             if (token != null && token.Any(c => char.IsControl(c) || char.IsWhiteSpace(c))) token = null;
             string plan = Json.Str(oauth, "subscriptionType");
             string error = "Claude Code のログインが必要です";
+            // Only a missing or expired login, or HTTP 401, offers the login button; network errors, 429 and 403 do not.
+            bool login = true;
             var expiry = Json.Date(Json.Get(oauth, "expiresAt"));
             if (!string.IsNullOrWhiteSpace(token) && (!expiry.HasValue || expiry > DateTimeOffset.UtcNow))
             {
@@ -218,9 +220,9 @@ namespace AIUsageManager
                     var result = UsageParser.Claude(response.Body, plan, DateTimeOffset.UtcNow, "オンライン");
                     result.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier"));
                     if (result.HasData) return result;
-                    error = "取得先から使用量が返りませんでした";
+                    error = "取得先から使用量が返りませんでした"; login = false;
                 }
-                else error = response.Error;
+                else { error = response.Error; login = response.NeedsLogin; }
             }
             else if (!string.IsNullOrWhiteSpace(token)) error = "Claude Code で再ログインが必要です";
             try
@@ -230,11 +232,11 @@ namespace AIUsageManager
                 var time = Json.Date(Json.Get(data, "timestamp") ?? Json.Get(data, "fetched_at") ?? Json.Get(data, "updated_at"));
                 var result = UsageParser.Claude(cache, plan, time, "既存キャッシュ");
                 result.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier"));
-                if (result.HasData) { result.Status = "オンライン未取得・保存値を表示"; return result; }
+                if (result.HasData) { result.Status = "オンライン未取得・保存値を表示"; result.NeedsLogin = login; return result; }
             }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
-            var missing = ServiceUsage.Empty("Claude", error); missing.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier")); return missing;
+            var missing = ServiceUsage.Empty("Claude", error); missing.Plan = Json.Plan(plan, Json.Str(oauth, "rateLimitTier")); missing.NeedsLogin = login; return missing;
         }
         static HttpRequestMessage GrokRequest(Dictionary<string, object> login, bool settings)
         {

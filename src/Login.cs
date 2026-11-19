@@ -13,10 +13,12 @@ namespace AIUsageManager
     {
         internal static ProcessStartInfo StartInfo(string service, string profile, string localAppData, string searchPath)
         {
-            if (service != "Codex" && service != "Grok") throw new ArgumentException("Unsupported login service");
-            string executable = service == "Grok" ? "grok.exe" : "codex.exe";
+            if (service != "Claude" && service != "Codex" && service != "Grok") throw new ArgumentException("Unsupported login service");
+            string executable = service == "Grok" ? "grok.exe" : service == "Claude" ? "claude.exe" : "codex.exe";
             var candidates = new List<string>();
-            candidates.Add(service == "Grok" ? Path.Combine(profile, ".grok", "bin", executable) : Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", executable));
+            // Each official installer's own location first; Claude Code's native installer uses %USERPROFILE%\.local\bin.
+            candidates.Add(service == "Grok" ? Path.Combine(profile, ".grok", "bin", executable) :
+                service == "Claude" ? Path.Combine(profile, ".local", "bin", executable) : Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", executable));
             foreach (string item in (searchPath ?? "").Split(';'))
             {
                 string directory = item.Trim().Trim('"');
@@ -37,7 +39,7 @@ namespace AIUsageManager
             foreach (string path in candidates)
             {
                 if (!File.Exists(path)) continue;
-                return new ProcessStartInfo(Path.GetFullPath(path), service == "Grok" ? "login --oauth" : "login") {
+                return new ProcessStartInfo(Path.GetFullPath(path), service == "Grok" ? "login --oauth" : service == "Claude" ? "auth login --claudeai" : "login") {
                     UseShellExecute = true, WindowStyle = ProcessWindowStyle.Normal, WorkingDirectory = profile
                 };
             }
