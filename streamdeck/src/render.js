@@ -18,10 +18,11 @@ function keyView(name, connection, settings, now) {
   const reported = presented.windows.filter(w => w.percent !== null || w.resetsAt !== null);
   // Each bar has its own tone, like the Obsidian toolbar: an expired or stale window is muted,
   // and only the window that has an alert takes the warning colour.
-  const bars = reported.map(w => {
+  // A key has room for three bars (Claude Max: 5時間, 週, 週（Fable）); further windows are not drawn.
+  const bars = reported.slice(0, 3).map(w => {
     const value = w.percent === null ? null : settings.metric === 'remaining' ? Math.max(0, 100 - w.percent) : w.percent;
     const tone = !w.active ? 'muted' : w.alert ? (w.percent >= 95 ? 'critical' : 'warning') : 'normal';
-    return { label: w.label, value, text: value === null ? '未取得' : Math.round(value) + '%', reset: settings.showReset ? w.reset : '', tone };
+    return { label: w.label, short: w.shortLabel, value, text: value === null ? '未取得' : Math.round(value) + '%', reset: settings.showReset ? w.reset : '', tone };
   });
   const caption = service.needsLogin ? '要ログイン' : presented.severity === 'muted' ? shorten(presented.state) : '';
   return { ...base, kind: 'usage', tone: presented.severity, caption, bars };
@@ -32,42 +33,45 @@ const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const text = (x, y, value, size, fill, weight = 400, anchor = 'middle') =>
   `<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(value)}</text>`;
 const fraction = value => value === null ? 0 : Math.max(0, Math.min(100, value)) / 100;
-const shortLabel = label => label === '5時間' ? '5h' : label;
+const caption = bar => bar.short || bar.label;
 
 const toneColor = (palette, tone) => ({ normal: palette.accent, warning: palette.warning, critical: palette.critical }[tone] || palette.muted);
 
+// Layouts for one, two and three bars on a 144×144 key.
 function vertical(view, palette) {
-  const xs = view.bars.length === 1 ? [72] : [44, 100];
+  const n = view.bars.length, three = n === 3, xs = n === 1 ? [72] : n === 2 ? [44, 100] : [30, 72, 114], w = three ? 18 : 22;
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), x = xs[i], height = 54, top = 40, fill = Math.round(height * fraction(bar.value));
-    return text(x, 35, shortLabel(bar.label), 11, palette.muted) +
-      `<rect x="${x - 11}" y="${top}" width="22" height="${height}" rx="5" fill="${palette.track}"/>` +
-      (fill > 0 ? `<rect x="${x - 11}" y="${top + height - fill}" width="22" height="${fill}" rx="5" fill="${color}"/>` : '') +
-      text(x, 114, bar.text, bar.value === null ? 13 : 17, bar.value === null ? palette.muted : color, 700) +
-      (view.caption ? '' : text(x, 133, bar.reset, 11, palette.muted));
+    return text(x, 35, caption(bar), three ? 10 : 11, palette.muted) +
+      `<rect x="${x - w / 2}" y="${top}" width="${w}" height="${height}" rx="5" fill="${palette.track}"/>` +
+      (fill > 0 ? `<rect x="${x - w / 2}" y="${top + height - fill}" width="${w}" height="${fill}" rx="5" fill="${color}"/>` : '') +
+      text(x, 114, bar.text, bar.value === null ? (three ? 10 : 13) : (three ? 14 : 17), bar.value === null ? palette.muted : color, 700) +
+      (view.caption ? '' : text(x, 133, bar.reset, three ? 9 : 11, palette.muted));
   }).join('');
 }
 function horizontal(view, palette) {
-  const rows = view.bars.length === 1 ? [62] : [46, 92];
+  const n = view.bars.length, three = n === 3, rows = n === 1 ? [62] : n === 2 ? [46, 92] : [34, 68, 102];
   return view.bars.map((bar, i) => {
-    const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value));
-    return text(12, y, shortLabel(bar.label), 12, palette.muted, 400, 'start') +
-      text(132, y, bar.text, bar.value === null ? 13 : 17, bar.value === null ? palette.muted : color, 700, 'end') +
-      `<rect x="12" y="${y + 6}" width="${width}" height="9" rx="4" fill="${palette.track}"/>` +
-      (fill > 0 ? `<rect x="12" y="${y + 6}" width="${fill}" height="9" rx="4" fill="${color}"/>` : '') +
-      (view.caption || !bar.reset ? '' : text(12, y + 29, 'リセット ' + bar.reset, 11, palette.muted, 400, 'start'));
+    const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value)), h = three ? 7 : 9;
+    return text(12, y, caption(bar), three ? 11 : 12, palette.muted, 400, 'start') +
+      text(132, y, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 14 : 17), bar.value === null ? palette.muted : color, 700, 'end') +
+      `<rect x="12" y="${y + 5}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
+      (fill > 0 ? `<rect x="12" y="${y + 5}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') +
+      (view.caption || !bar.reset ? '' : text(12, y + (three ? 23 : 29), (three ? '' : 'リセット ') + bar.reset, three ? 9 : 11, palette.muted, 400, 'start'));
   }).join('');
 }
 function ring(view, palette) {
-  const single = view.bars.length === 1, xs = single ? [72] : [42, 102], r = single ? 34 : 22, cy = single ? 76 : 70;
+  const n = view.bars.length, single = n === 1, three = n === 3;
+  const xs = single ? [72] : three ? [26, 72, 118] : [42, 102], r = single ? 34 : three ? 16 : 22, cy = single ? 76 : three ? 66 : 70, stroke = single ? 9 : three ? 6 : 7;
   const circumference = 2 * Math.PI * r;
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), x = xs[i], arc = (circumference * fraction(bar.value)).toFixed(1);
-    return `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${palette.track}" stroke-width="${single ? 9 : 7}"/>` +
-      (bar.value ? `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${single ? 9 : 7}" stroke-linecap="round" stroke-dasharray="${arc} ${circumference.toFixed(1)}" transform="rotate(-90 ${x} ${cy})"/>` : '') +
-      text(x, cy + (single ? 6 : 5), bar.text, single ? (bar.value === null ? 13 : 19) : (bar.value === null ? 10 : 14), bar.value === null ? palette.muted : color, 700) +
-      (single ? '' : text(x, cy + r + 15, shortLabel(bar.label), 11, palette.muted)) +
-      (view.caption || !bar.reset ? '' : text(x, 136, bar.reset, 11, palette.muted));
+    const size = single ? (bar.value === null ? 13 : 19) : three ? (bar.value === null ? 8 : 11) : (bar.value === null ? 10 : 14);
+    return `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${palette.track}" stroke-width="${stroke}"/>` +
+      (bar.value ? `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${arc} ${circumference.toFixed(1)}" transform="rotate(-90 ${x} ${cy})"/>` : '') +
+      text(x, cy + (single ? 6 : 4), bar.text, size, bar.value === null ? palette.muted : color, 700) +
+      (single ? '' : text(x, cy + r + 15, caption(bar), three ? 10 : 11, palette.muted)) +
+      (view.caption || !bar.reset ? '' : text(x, 136, bar.reset, three ? 9 : 11, palette.muted));
   }).join('');
 }
 

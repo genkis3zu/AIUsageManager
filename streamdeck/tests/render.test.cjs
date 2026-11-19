@@ -7,10 +7,10 @@ const { keyView, renderKey } = require('../src/render');
 const RECORDED = '2026-11-19T00:00:00.000Z', NOW = Date.parse(RECORDED) + 60000, LATER_RESET = '2026-11-21T00:00:00.000Z';
 const SHAPE = { '5時間': ['5h', '5h'], '週': ['週', 'week'] };
 const win = (label, percent, resetsAt = LATER_RESET) => ({ label, shortLabel: (SHAPE[label] || [label.slice(2, -1), 'week'])[0], span: (SHAPE[label] || [0, 'week'])[1], percent, resetsAt, pace: null, alert: null });
-function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt] } = {}) {
+function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null } = {}) {
   const service = (name, windows) => ({ name, plan: 'Pro', source, status, needsLogin: needsLogin[name] === true, recordedAt, windows });
   return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, services: [
-    service('Claude', [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
+    service('Claude', claudeWindows ? claudeWindows.map(([label, percent]) => win(label, percent)) : [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
     service('Codex', [win('週', codex, resetsAt)]),
     service('Grok', [win('週', grok, resetsAt)]),
   ] });
@@ -35,6 +35,25 @@ test('a Claude window the service did not report is not drawn', () => {
 });
 test('a window with a reset time but no percent still shows 未取得', () => {
   assert.deepEqual(view('Claude', { claude: [null, 20] }).bars.map(b => [b.label, b.text]), [['5時間', '未取得'], ['週', '20%']]);
+});
+test('Claude Max shows 5h, 週 and Fable bars in every style', () => {
+  const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] });
+  assert.deepEqual(v.bars.map(b => [b.label, b.short, b.text]), [['5時間', '5h', '10%'], ['週', '週', '20%'], ['週（Fable）', 'Fable', '86%']]);
+  for (const style of STYLES) {
+    const svg = renderKey(v, { ...defaultSettings('Claude'), style });
+    for (const text of ['>10%<', '>20%<', '>86%<', '>5h<', '>週<', '>Fable<']) assert.ok(svg.includes(text), style + ' ' + text);
+    assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="144" height="144" viewBox="0 0 144 144">/);
+  }
+});
+test('a fourth window is not drawn', () => {
+  const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 30], ['週（Other）', 40]] });
+  assert.deepEqual(v.bars.map(b => b.short), ['5h', '週', 'Fable']);
+  for (const style of STYLES) assert.ok(!renderKey(v, { ...defaultSettings('Claude'), style }).includes('Other'));
+});
+test('short labels come from the snapshot', () => {
+  const v = view('Claude', { claudeWindows: [['週', 74], ['週（Fable）', 91]] });
+  assert.deepEqual(v.bars.map(b => b.short), ['週', 'Fable']);
+  for (const style of STYLES) assert.ok(renderKey(v, { ...defaultSettings('Claude'), style }).includes('>Fable<'), style);
 });
 test('Claude has 5時間 and 週 bars, Codex and Grok have 週', () => {
   assert.deepEqual(view('Claude').bars.map(b => b.label), ['5時間', '週']);
