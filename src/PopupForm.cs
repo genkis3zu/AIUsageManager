@@ -26,6 +26,8 @@ namespace AIUsageManager
                 Invalidate();
             }
         }
+        // Full names fit two columns; with three or more windows the short names (5h, 週, Fable) are used.
+        internal static string Caption(UsageWindow window,int count) { return count>=3?window.ShortLabel:window.Label; }
         public UsageRow() {
             DoubleBuffered=true;BackColor=Color.White;AccessibleRole=AccessibleRole.Grouping;TabStop=false;
             login.FlatAppearance.BorderSize=0;Controls.Add(login);
@@ -57,15 +59,19 @@ namespace AIUsageManager
             bool online=usage.Source=="オンライン";
             using(var b=new SolidBrush(online?palette.Blue:palette.Muted))g.FillEllipse(b,302,21,5,5);
             Artwork.Text(g,string.IsNullOrEmpty(usage.Source)?"未取得":usage.Source,10,false,palette.Muted,new RectangleF(310,14,78,19),false);
-            int count=usage.Windows.Count;float column=348f/count;
+            // The number of windows depends on the plan (e.g. Claude Max: 5時間, 週, 週（Fable）).
+            int count=usage.Windows.Count;float column=348f/Math.Max(1,count);
+            if(count==0)Artwork.Text(g,"未取得",11,false,palette.Muted,new RectangleF(39,41,120,20),false);
             for(int i=0;i<count;i++)
             {
                 var w=usage.Windows[i];float left=39+i*column;
                 bool expired=w.ResetsAt.HasValue && w.ResetsAt.Value<=DateTimeOffset.Now;
                 Color fill=w.Percent>=80?palette.Red:palette.Fill;
-                Artwork.Text(g,w.Label,11,false,palette.Muted,new RectangleF(left,41,35,20),false);
+                string caption=Caption(w,count);
+                float labelWidth=caption.Length<=3?(count==1?25:35):(count>=3?42:Math.Min(column-90,10+caption.Length*9));
+                Artwork.Text(g,caption,11,false,palette.Muted,new RectangleF(left,41,labelWidth,20),false);
                 Artwork.Text(g,UsageText.Percent(w.Percent),12,true,w.Percent.HasValue?fill:palette.Muted,new RectangleF(left+column-60,40,51,20),true);
-                float barLeft=left+(count==2?36:26),barWidth=column-(count==2?94:84);
+                float barLeft=left+labelWidth+1,barWidth=Math.Max(6,column-labelWidth-59);
                 if(w.Percent.HasValue)Artwork.Pill(g,palette.Track,new RectangleF(barLeft,49,barWidth,5));
                 if(w.Percent.HasValue && w.Percent>0)Artwork.Pill(g,fill,new RectangleF(barLeft,49,(float)(barWidth*Math.Min(100,w.Percent.Value)/100),5));
                 if(!w.Percent.HasValue)Artwork.Text(g,"—",10,false,palette.Muted,new RectangleF(barLeft,41,barWidth,18),false);

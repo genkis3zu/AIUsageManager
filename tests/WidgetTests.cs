@@ -41,6 +41,14 @@ internal static partial class Tests
                 Assert(card.Contains("Claude")&&card.Contains("Codex")&&card.Contains("Grok")&&card.Contains("Max 20x")&&card.Contains("1%")&&card.Contains("98%"));
             }
         });
+        Check("Widget shows 週（Fable） on large cards and Fable on medium cards",()=> {
+            var values=WidgetValues();values[0].Windows.Clear();values[0].Windows.Add(UsageWindow.Week(40,T.AddDays(3)));values[0].Windows.Add(UsageWindow.Scoped("Fable",70,T.AddDays(3)));
+            var root=Json.Parse(WidgetCards.Create(values,T));var serializer=new JavaScriptSerializer();
+            string large=serializer.Serialize(root["large"]),medium=serializer.Serialize(root["medium"]);
+            // Visible text uses the short name on medium cards; the bar's alternative text keeps the full name.
+            Assert(large.Contains("\"text\":\"週（Fable）  70%")&&medium.Contains("\"text\":\"Fable  70%")&&!medium.Contains("\"text\":\"週（Fable）")&&medium.Contains("週（Fable） 70%")&&!large.Contains("5時間"));
+        });
+        Check("Widget bar width follows the window count",()=>Assert(WidgetCards.BarWidth(1)==360&&WidgetCards.BarWidth(2)==180&&WidgetCards.BarWidth(3)==120&&WidgetCards.BarWidth(0)==360));
         Check("Widget high usage uses attention text",()=>Assert(WidgetCards.Create(WidgetValues(),T).Contains("\"color\":\"attention\"")));
         Check("Widget keeps original observation time",()=> {
             string json=WidgetCards.Create(WidgetValues(),T);Assert(json.Contains(T.AddHours(-1).ToLocalTime().ToString("MM/dd HH:mm"))&&json.Contains("CLI 記録"));

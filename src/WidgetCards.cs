@@ -18,6 +18,7 @@ namespace AIUsageManager
         }
         static object Text(string text,string color,bool subtle)
         {return O("type","TextBlock","text",text,"size","small","spacing","none","wrap",false,"color",color,"isSubtle",subtle);}
+        internal static int BarWidth(int count) { return 360/Math.Max(1,count); }
         static string Bar(double? percent,int width)
         {
             using(var bitmap=new Bitmap(width,6))using(var g=Graphics.FromImage(bitmap))using(var output=new MemoryStream())
@@ -47,10 +48,10 @@ namespace AIUsageManager
             {
                 string reset=UsageText.Reset(window,now).Replace("リセットまで ","");
                 string compactReset=reset.Replace("期限経過・再取得待ち","期限経過").Replace("リセット時刻不明","時刻不明").Replace("時間","h").Replace("日","d").Replace("分","m").Replace(" ","");
-                string label=large?window.Label:window.Label.Replace("時間","h");
+                string label=large?window.Label:window.ShortLabel;
                 var windowItems=new List<object>{
                     Text(label+"  "+UsageText.Percent(window.Percent)+(large?"":" · "+compactReset),window.Percent>=80?"attention":"default",false)};
-                if(window.Percent.HasValue)windowItems.Add(O("type","Image","url",Bar(window.Percent,value.Windows.Count==2?180:360),"size","stretch","spacing","none","altText",window.Label+" "+UsageText.Percent(window.Percent)+" リセット "+reset));
+                if(window.Percent.HasValue)windowItems.Add(O("type","Image","url",Bar(window.Percent,BarWidth(value.Windows.Count)),"size","stretch","spacing","none","altText",window.Label+" "+UsageText.Percent(window.Percent)+" リセット "+reset));
                 if(large)windowItems.Add(Text(window.ResetsAt.HasValue&&window.ResetsAt>now?"リセット "+reset:reset,"default",true));
                 columns.Add(O("type","Column","width","stretch","spacing","small","items",windowItems));
             }
