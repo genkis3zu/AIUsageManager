@@ -10,7 +10,7 @@ const win = (label, percent, resetsAt = LATER_RESET) => ({ label, shortLabel: (S
 function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null, aiStatus = null } = {}) {
   const service = (name, windows) => ({ name, plan: 'Pro', source, status, needsLogin: needsLogin[name] === true, recordedAt, windows });
   return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, ...(aiStatus ? { status: aiStatus } : {}), services: [
-    service('Claude', claudeWindows ? claudeWindows.map(([label, percent]) => win(label, percent)) : [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
+    service('Claude', claudeWindows ? claudeWindows.map(([label, percent, at]) => win(label, percent, at)) : [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
     service('Codex', [win('週', codex, resetsAt)]),
     service('Grok', [win('週', grok, resetsAt)]),
   ] });
@@ -36,39 +36,56 @@ test('a Claude window the service did not report is not drawn', () => {
 test('a window with a reset time but no percent still shows 未取得', () => {
   assert.deepEqual(view('Claude', { claude: [null, 20] }).bars.map(b => [b.label, b.text]), [['5時間', '未取得'], ['週', '20%']]);
 });
-test('Claude Max shows 5h, 週 and Fable bars in every style', () => {
+test('a key draws one weekly bar: the one with the higher use', () => {
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }).bars.map(b => [b.label, b.short, b.text]), [['週（Fable）', 'Fable', '95%']]);
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', 60], ['週（Fable）', 40]] }).bars.map(b => b.text), ['60%']);
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', 50], ['週（Fable）', 50]] }).bars.map(b => b.label), ['週'], 'a tie keeps 週');
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', null], ['週（Fable）', 30]] }).bars.map(b => b.label), ['週（Fable）']);
+  // A window whose reset time has passed holds an old value and does not win over the current one.
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', 40], ['週（Fable）', 99, new Date(NOW - 60000).toISOString()]] }).bars.map(b => b.label), ['週']);
+});
+test('Claude Max shows 5h and the higher weekly bar in every style', () => {
   const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] });
-  assert.deepEqual(v.bars.map(b => [b.label, b.short, b.text]), [['5時間', '5h', '10%'], ['週', '週', '20%'], ['週（Fable）', 'Fable', '86%']]);
+  assert.deepEqual(v.bars.map(b => [b.label, b.short, b.text]), [['5時間', '5h', '10%'], ['週（Fable）', 'Fable', '86%']]);
   for (const style of STYLES) {
     const svg = renderKey(v, { ...defaultSettings('Claude'), style });
-    for (const text of ['>10%<', '>20%<', '>86%<', '>5h<', '>週<', '>Fable<']) assert.ok(svg.includes(text), style + ' ' + text);
+    for (const text of ['>10%<', '>86%<', '>5h<', '>Fable<']) assert.ok(svg.includes(text), style + ' ' + text);
+    assert.ok(!svg.includes('>20%<'), style);
     assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="144" height="144" viewBox="0 0 144 144">/);
   }
 });
 test('long model names are shortened to fit each layout', () => {
-  const three = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（VeryLongModelName）', 30]] });
-  const two = view('Claude', { claudeWindows: [['週', 20], ['週（VeryLongModelName）', 30]] });
+  const two = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（VeryLongModelName）', 30]] });
+  const three = { title: 'Claude', kind: 'usage', message: '', caption: '', tone: 'normal', bars: ['5h', '週', 'VeryLongModelName'].map(short => ({ label: short, short, value: 10, text: '10%', reset: '1h', tone: 'normal' })) };
   for (const style of STYLES) {
     const svg3 = renderKey(three, { ...defaultSettings('Claude'), style }), svg2 = renderKey(two, { ...defaultSettings('Claude'), style });
     assert.ok(svg3.includes('>Very…<') && !svg3.includes('VeryLongModelName'), style + ' three');
     assert.ok(svg2.includes('>VeryLon…<') && !svg2.includes('VeryLongModelName'), style + ' two');
   }
 });
+test('horizontal keys put a larger reset time at the right edge under each bar', () => {
+  const one = renderKey(view('Codex'), { ...defaultSettings('Codex'), style: 'horizontal' });
+  assert.match(one, /<text x="132" y="128" [^>]*text-anchor="end"><tspan font-size="12" fill="[^"]+">リセット <\/tspan><tspan font-size="18" font-weight="700" fill="[^"]+">1日23h<\/tspan><\/text>/);
+  const two = renderKey(view('Claude'), { ...defaultSettings('Claude'), style: 'horizontal' });
+  const ys = [...two.matchAll(/<text x="132" y="(\d+)" [^>]*text-anchor="end"><tspan font-size="10" fill="[^"]+">リセット <\/tspan><tspan font-size="15" font-weight="700" fill="[^"]+">1日23h<\/tspan>/g)].map(m => Number(m[1]));
+  assert.deepEqual(ys, [72, 122]);
+  assert.ok(!renderKey(view('Codex', {}, { showReset: false }), { ...defaultSettings('Codex'), style: 'horizontal', showReset: false }).includes('リセット'));
+});
 test('three-bar keys use text of at least 10 px in every style', () => {
-  const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] });
+  const v = { title: 'Claude', kind: 'usage', message: '', caption: '', tone: 'normal', bars: ['5h', '週', 'Fable'].map((short, i) => ({ label: short, short, value: 10 * (i + 1), text: 10 * (i + 1) + '%', reset: '2日5h', tone: 'normal' })) };
   for (const style of STYLES) {
     const sizes = [...renderKey(v, { ...defaultSettings('Claude'), style }).matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
     assert.ok(sizes.length > 0 && Math.min(...sizes) >= 10, style + ' ' + sizes);
   }
 });
-test('a fourth window is not drawn', () => {
+test('however many weekly windows there are, one weekly bar is drawn', () => {
   const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 30], ['週（Other）', 40]] });
-  assert.deepEqual(v.bars.map(b => b.short), ['5h', '週', 'Fable']);
-  for (const style of STYLES) assert.ok(!renderKey(v, { ...defaultSettings('Claude'), style }).includes('Other'));
+  assert.deepEqual(v.bars.map(b => b.short), ['5h', 'Other']);
+  for (const style of STYLES) assert.ok(!renderKey(v, { ...defaultSettings('Claude'), style }).includes('>Fable<'));
 });
 test('short labels come from the snapshot', () => {
-  const v = view('Claude', { claudeWindows: [['週', 74], ['週（Fable）', 91]] });
-  assert.deepEqual(v.bars.map(b => b.short), ['週', 'Fable']);
+  const v = view('Claude', { claudeWindows: [['5時間', 74], ['週（Fable）', 91]] });
+  assert.deepEqual(v.bars.map(b => b.short), ['5h', 'Fable']);
   for (const style of STYLES) assert.ok(renderKey(v, { ...defaultSettings('Claude'), style }).includes('>Fable<'), style);
 });
 test('Claude has 5時間 and 週 bars, Codex and Grok have 週', () => {
@@ -170,6 +187,29 @@ test('status key: the headline takes the tone colour and stays inside the key', 
   assert.ok(both.includes('>Claude も一部不調<') && both.includes('>（Claude Code）<'), 'the second line starts at the bracket');
   const escaped = renderKey(statusOf({ ...AI.critical, title: '<b>& 障害', detail: '<i>' }), { palette: STATUS_PALETTE });
   assert.ok(escaped.includes('&lt;b&gt;&amp;') && escaped.includes('&lt;i&gt;') && !escaped.includes('<b>') && !escaped.includes('<i>'));
+});
+const rows = (...list) => list.map(([company, tone, detail = '']) => ({ company, tone, detail }));
+test('status key: one line per company says how each one is', () => {
+  const v = statusOf({ ...AI.normal, providers: rows(['Claude', 'normal'], ['OpenAI', 'normal']) });
+  assert.deepEqual([v.kind, v.rows.map(r => [r.name, r.state, r.tone]), v.note], ['status', [['Claude', '正常', 'normal'], ['OpenAI', '正常', 'normal']], '']);
+  const w = statusOf({ ...AI.warning, providers: rows(['Claude', 'normal'], ['OpenAI', 'warning', 'Codex']) });
+  assert.deepEqual([w.rows.map(r => [r.state, r.tone]), w.note, w.noteTone], [[['正常', 'normal'], ['一部不調', 'warning']], 'Codex', 'muted']);
+  const both = statusOf({ ...AI.critical, providers: rows(['Claude', 'critical', 'Claude Code'], ['OpenAI', 'unknown']) });
+  assert.deepEqual([both.rows.map(r => r.state), both.note], [['障害', '確認できず'], 'Claude Code']);
+  const reset = statusOf({ ...AI.reset, providers: rows(['Claude', 'normal'], ['OpenAI', 'normal']) });
+  assert.deepEqual([reset.note, reset.noteTone], ['Claude Fable リセット', 'reset']);
+  // Without company lines (an older tray app) the key keeps the single headline.
+  assert.deepEqual(statusOf(AI.normal).lines, ['正常']);
+});
+test('status key: company lines are coloured by state and fit the key', () => {
+  const p = paletteFor(STATUS_PALETTE);
+  const svg = renderKey(statusOf({ ...AI.critical, providers: rows(['Claude', 'critical', 'Claude Code'], ['OpenAI', 'unknown']) }), { palette: STATUS_PALETTE });
+  for (const [text, fill] of [['Claude', p.text], ['障害', p.critical], ['OpenAI', p.text], ['確認できず', p.muted], ['Claude Code', p.muted]])
+    assert.match(svg, new RegExp(`fill="${fill}"[^>]*>${text}<`), text);
+  const ok = renderKey(statusOf({ ...AI.reset, providers: rows(['Claude', 'normal'], ['OpenAI', 'warning']) }), { palette: STATUS_PALETTE });
+  assert.match(ok, new RegExp(`fill="${p.accent}"[^>]*>正常<`)); assert.match(ok, new RegExp(`fill="${p.warning}"[^>]*>一部不調<`));
+  const sizes = [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
+  assert.ok(Math.min(...sizes) >= 10 && Math.max(...sizes) <= 16, String(sizes));
 });
 test('state: one failure keeps last values; two disconnect; success resets', () => {
   const first = connected();

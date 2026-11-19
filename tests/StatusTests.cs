@@ -115,9 +115,10 @@ internal static partial class Tests
             var c = StatusSummary.Create(new[] { ok, okOpenAI }, reset, T);
             Assert(c.Tone == "reset" && c.Title == "Claude Fable リセット" && c.Page == null && c.Line == "Claude 週（Fable） がリセットされました");
             var d = StatusSummary.Create(new[] { ok, okOpenAI }, new ResetNotice[0], T);
-            Assert(d.Tone == "normal" && d.Title == "正常" && d.Line == "AIの状況：正常");
+            Assert(d.Tone == "normal" && d.Title == "正常" && d.Line == "AIの状況：Claude 正常・OpenAI 正常");
+            Assert(d.Providers.Select(p => p.Company).SequenceEqual(new[] { "Claude", "OpenAI" }));
             var e = StatusSummary.Create(new[] { ok, unknown }, new ResetNotice[0], T);
-            Assert(e.Tone == "normal" && e.Line == "AIの状況：正常（OpenAI は確認できません）");
+            Assert(e.Tone == "normal" && e.Line == "AIの状況：Claude 正常・OpenAI 確認できず");
             var f = StatusSummary.Create(new[] { new ProviderStatus { Company = "Claude", Level = StatusLevel.Unknown, Detail = "" }, unknown }, new ResetNotice[0], T);
             Assert(f.Tone == "unknown" && f.Title == "確認できません" && f.Line == "AIの状況：障害情報を確認できません");
         });

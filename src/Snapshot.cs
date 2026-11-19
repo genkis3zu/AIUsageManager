@@ -35,7 +35,8 @@ namespace AIUsageManager
                     "recordedAt",Date(value.RecordedAt),"windows",windows));
             }
             var root=Map("schemaVersion",2,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services);
-            if(status!=null)root.Add("status",Map("tone",status.Tone,"title",status.Title,"detail",status.Detail,"page",status.Page,"line",status.Line));
+            if(status!=null)root.Add("status",Map("tone",status.Tone,"title",status.Title,"detail",status.Detail,"page",status.Page,"line",status.Line,
+                "providers",status.Providers.Select(p=>Map("company",p.Company,"tone",StatusSummary.ToneOf(p.Level),"detail",p.Detail??"")).ToArray()));
             return new JavaScriptSerializer().Serialize(root);
         }
     }

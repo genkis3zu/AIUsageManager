@@ -151,9 +151,20 @@ namespace AIUsageManager
     {
         public const string ClaudePage = "https://status.claude.com/", OpenAIPage = "https://status.openai.com/";
         public string Tone, Title, Detail = "", Line, Page;
+        // Each company's own state, so the display can say what is normal rather than only "正常".
+        public ProviderStatus[] Providers = new ProviderStatus[0];
         public static StatusSummary Create(ProviderStatus[] providers, ResetNotice[] resets, DateTimeOffset now)
         {
-            providers = providers ?? new ProviderStatus[0]; resets = resets ?? new ResetNotice[0];
+            var summary = Choose(providers ?? new ProviderStatus[0], resets ?? new ResetNotice[0]);
+            summary.Providers = (providers ?? new ProviderStatus[0]).Where(p => p != null).ToArray();
+            return summary;
+        }
+        public static string ToneOf(StatusLevel level)
+        {
+            return level == StatusLevel.Major ? "critical" : level == StatusLevel.Minor ? "warning" : level == StatusLevel.Operational ? "normal" : "unknown";
+        }
+        static StatusSummary Choose(ProviderStatus[] providers, ResetNotice[] resets)
+        {
             // Every company with a problem is named: the worse one leads (Claude first on a tie) and sets the colour and page,
             // so an outage at one company never hides a problem at the other.
             var problems = providers.Where(p => p != null && p.Level >= StatusLevel.Minor).OrderByDescending(p => p.Level).ToArray();
@@ -173,7 +184,7 @@ namespace AIUsageManager
                 return new StatusSummary { Tone = "unknown", Title = "確認できません", Line = "AIの状況：障害情報を確認できません" };
             string missing = string.Join("、", unknown);
             return new StatusSummary { Tone = "normal", Title = "正常", Detail = unknown.Length > 0 ? missing + " は確認できません" : "",
-                Line = "AIの状況：正常" + (unknown.Length > 0 ? "（" + missing + " は確認できません）" : "") };
+                Line = "AIの状況：" + string.Join("・", providers.Where(p => p != null).Select(p => p.Company + (p.Level == StatusLevel.Unknown ? " 確認できず" : " 正常"))) };
         }
         static string State(ProviderStatus p) { return p.Level == StatusLevel.Major ? "障害" : "一部不調"; }
         static string InBrackets(string detail) { return string.IsNullOrEmpty(detail) ? "" : "（" + detail + "）"; }

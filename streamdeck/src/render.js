@@ -4,6 +4,17 @@ const { paletteFor } = require('./settings');
 
 const shorten = text => { const chars = Array.from(text || ''); return chars.length > 9 ? chars.slice(0, 9).join('') + '…' : chars.join(''); };
 
+// A key draws one weekly bar. When a service reports several weekly windows (Claude: 週 and Fable), the one with
+// the higher use is drawn, because it reaches its limit first. A window whose reset time has passed holds an old value
+// and gives way to a current one; on a tie the first (週) is kept.
+function oneWeekly(windows) {
+  const weekly = windows.filter(w => w.span === 'week');
+  if (weekly.length < 2) return windows;
+  const rank = w => (w.active ? 1000000 : 0) + (w.percent === null ? -1 : w.percent);
+  const keep = weekly.reduce((best, w) => rank(w) > rank(best) ? w : best);
+  return windows.filter(w => w.span !== 'week' || w === keep);
+}
+
 // What one key shows, decided from the shared snapshot with the same rules as the Obsidian toolbar.
 function keyView(name, connection, settings, now) {
   const base = { title: name, kind: 'message', message: '', caption: '', tone: 'muted', bars: [], needsLogin: false };
@@ -15,10 +26,10 @@ function keyView(name, connection, settings, now) {
   if (presented.windows.every(w => w.percent === null)) return { ...base, message: service.needsLogin ? '要ログイン' : '未取得', needsLogin: service.needsLogin === true };
   // A window with neither a percent nor a reset time was not reported by the service at all
   // (Claude no longer returns a 5-hour window), so it is left out when another window has data.
-  const reported = presented.windows.filter(w => w.percent !== null || w.resetsAt !== null);
+  const reported = oneWeekly(presented.windows.filter(w => w.percent !== null || w.resetsAt !== null));
   // Each bar has its own tone, like the Obsidian toolbar: an expired or stale window is muted,
   // and only the window that has an alert takes the warning colour.
-  // A key has room for three bars (Claude Max: 5時間, 週, 週（Fable）); further windows are not drawn.
+  // With one weekly bar a key normally has one or two bars; at most three are drawn.
   const bars = reported.slice(0, 3).map(w => {
     const value = w.percent === null ? null : settings.metric === 'remaining' ? Math.max(0, 100 - w.percent) : w.percent;
     const tone = !w.active ? 'muted' : w.alert ? (w.percent >= 95 ? 'critical' : 'warning') : 'normal';
@@ -29,6 +40,7 @@ function keyView(name, connection, settings, now) {
 }
 
 const STATUS_TITLE = 'AIの状況';
+const STATE_WORDS = { normal: '正常', warning: '一部不調', critical: '障害', unknown: '確認できず' };
 // The AIの状況 key: the company (or service) on the first line, what happened on the second.
 function statusView(connection) {
   const base = { title: STATUS_TITLE, kind: 'message', message: '', caption: '', tone: 'muted', bars: [] };
@@ -36,6 +48,14 @@ function statusView(connection) {
   if (connection.status !== 'connected' || !connection.snapshot) return { ...base, message: '未接続' };
   const status = connection.snapshot.status;
   if (!status) return { ...base, message: '未取得' };
+  // One line per company says how each one is; the line under them gives the affected parts or a recent reset.
+  if (status.providers && status.providers.length > 0) {
+    const rows = status.providers.map(p => ({ name: p.company, state: STATE_WORDS[p.tone], tone: p.tone }));
+    const reset = status.tone === 'reset';
+    const affected = status.providers.filter(p => p.tone === 'critical' || p.tone === 'warning').map(p => p.detail).filter(Boolean);
+    return { ...base, kind: 'status', tone: status.tone, rows, note: reset ? status.title : affected.join('、'), noteTone: reset ? 'reset' : 'muted', page: status.page };
+  }
+  // A tray app that does not send company lines: the summary as a headline.
   const space = status.title.indexOf(' ');
   const lines = space > 0 ? [status.title.slice(0, space), status.title.slice(space + 1)] : [status.title];
   return { ...base, kind: 'status', tone: status.tone, lines, detail: status.detail, page: status.page };
@@ -70,7 +90,21 @@ function wrap(value, maxEm) {
   const end = soft >= cut / 2 ? soft : cut;
   return [chars.slice(0, end).join('').trimEnd(), fitWidth(chars.slice(end).join('').trimStart(), maxEm)];
 }
+function statusRows(view, palette) {
+  const colors = { critical: palette.critical, warning: palette.warning, normal: palette.accent };
+  const rows = view.rows.slice(0, 3), ys = rows.length <= 2 ? [58, 84] : [50, 72, 94];
+  const body = rows.map((row, i) => {
+    // The company name is 14 px; the state takes the rest of the line, up to 15 px.
+    const name = fitWidth(row.name, 7), room = 120 - widthEm(name) * 14 - 6;
+    const size = Math.max(10, Math.min(15, Math.floor(room / widthEm(row.state))));
+    return text(12, ys[i], name, 14, palette.text, 700, 'start') + text(132, ys[i], row.state, size, colors[row.tone] || palette.muted, 700, 'end');
+  }).join('');
+  const note = view.note ? wrap(view.note, 120 / 11) : [];
+  const noteYs = rows.length <= 2 ? (note.length === 1 ? [116] : [110, 126]) : (note.length === 1 ? [120] : [114, 128]);
+  return body + note.map((line, i) => text(72, noteYs[i], line, 11, view.noteTone === 'reset' ? palette.accent : palette.muted)).join('');
+}
 function statusBody(view, palette) {
+  if (view.rows) return statusRows(view, palette);
   const color = { critical: palette.critical, warning: palette.warning, reset: palette.accent, normal: palette.text }[view.tone] || palette.muted;
   const ys = view.lines.length === 1 ? [80] : [58, 86];
   // 22 px when the line fits, smaller for longer lines (not below 13 px); what still does not fit is cut.
@@ -95,15 +129,21 @@ function vertical(view, palette) {
       (view.caption ? '' : text(x, 133, bar.reset, three ? 10 : 11, palette.muted));
   }).join('');
 }
+// The time to the reset sits at the right edge under its bar: the word リセット small, the time itself large.
+const resetText = (y, value, labelSize, size, fill, muted) =>
+  `<text x="132" y="${y}" font-family="${FONT}" text-anchor="end"><tspan font-size="${labelSize}" fill="${muted}">リセット </tspan>` +
+  `<tspan font-size="${size}" font-weight="700" fill="${fill}">${esc(value)}</tspan></text>`;
 function horizontal(view, palette) {
-  const n = view.bars.length, three = n === 3, rows = n === 1 ? [62] : n === 2 ? [46, 92] : [34, 68, 102];
+  const n = view.bars.length, three = n === 3, rows = n === 1 ? [68] : n === 2 ? [44, 94] : [34, 68, 102];
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value)), h = three ? 7 : 9;
-    return text(12, y, caption(bar, n), three ? 11 : 12, palette.muted, 400, 'start') +
-      text(132, y, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 14 : 17), bar.value === null ? palette.muted : color, 700, 'end') +
-      `<rect x="12" y="${y + 5}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
-      (fill > 0 ? `<rect x="12" y="${y + 5}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') +
-      (view.caption || !bar.reset ? '' : text(12, y + (three ? 23 : 29), (three ? '' : 'リセット ') + bar.reset, three ? 10 : 11, palette.muted, 400, 'start'));
+    const time = bar.tone === 'muted' ? palette.muted : palette.text;
+    const reset = view.caption || !bar.reset ? '' : three ? text(132, y + 23, bar.reset, 10, palette.muted, 400, 'end') :
+      n === 1 ? resetText(128, bar.reset, 12, 18, time, palette.muted) : resetText(y + 28, bar.reset, 10, 15, time, palette.muted);
+    return text(12, y, caption(bar, n), three ? 11 : 13, palette.muted, 400, 'start') +
+      text(132, y, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 14 : n === 1 ? 22 : 18), bar.value === null ? palette.muted : color, 700, 'end') +
+      `<rect x="12" y="${y + 6}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
+      (fill > 0 ? `<rect x="12" y="${y + 6}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') + reset;
   }).join('');
 }
 function ring(view, palette) {

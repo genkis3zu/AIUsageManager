@@ -71,6 +71,8 @@ internal static partial class Tests
             string json=UsageSnapshot.Create(values,T,false,status);
             Assert(json.Contains("\"status\":{")&&json.Contains("\"tone\":\"critical\"")&&json.Contains("\"title\":\"Claude 障害\"")&&json.Contains("\"detail\":\"Claude Code\"")&&json.Contains("\"page\":\"https://status.claude.com/\""));
             Assert(!UsageSnapshot.Create(values,T,false).Contains("\"status\":{"));
+            var two=StatusSummary.Create(new[]{new ProviderStatus{Company="Claude",Level=StatusLevel.Minor,Detail="Claude Code"},new ProviderStatus{Company="OpenAI",Level=StatusLevel.Unknown}},new ResetNotice[0],T);
+            Assert(UsageSnapshot.Create(values,T,false,two).Contains("\"providers\":[{\"company\":\"Claude\",\"tone\":\"warning\",\"detail\":\"Claude Code\"},{\"company\":\"OpenAI\",\"tone\":\"unknown\",\"detail\":\"\"}]"));
         });
         Check("Snapshot drops expired warning messages while retaining original usage",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[1].Percent=100;

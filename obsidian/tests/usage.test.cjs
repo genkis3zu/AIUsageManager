@@ -64,7 +64,7 @@ test('settings preserve only supported mode and an absolute executable path',()=
 test('the AIの状況 status is kept when valid; a bad page or tone never passes through',()=> {
   const status={tone:'critical',title:'Claude 障害',detail:'Claude Code',page:'https://status.claude.com/',line:'Claude 障害（Claude Code）'};
   const p=payload();p.status=status;
-  assert.deepEqual(parseSnapshot(JSON.stringify(p)).status,status);
+  assert.deepEqual(parseSnapshot(JSON.stringify(p)).status,{...status,providers:[]});
   assert.equal(parseSnapshot(JSON.stringify(payload())).status,null);
   for(const tone of ['purple','',null,1]){const q=payload();q.status={...status,tone};assert.equal(parseSnapshot(JSON.stringify(q)).status,null,String(tone));}
   for(const page of ['https://evil.example/','http://status.claude.com/','https://status.claude.com/x','javascript:alert(1)',1]){const q=payload();q.status={...status,page};assert.equal(parseSnapshot(JSON.stringify(q)).status.page,null,String(page));}
@@ -73,6 +73,14 @@ test('the AIの状況 status is kept when valid; a bad page or tone never passes
   assert.equal(s.title.length,60);assert.equal(s.detail.length,180);
   for(const bad of ['text',[],null]){const q=payload();q.status=bad;assert.equal(parseSnapshot(JSON.stringify(q)).status,null);}
   assert.equal(parseSnapshot(JSON.stringify({schemaVersion:2,connected:false,services:[],status})).status,null);
+  assert.deepEqual(parseSnapshot(JSON.stringify(p)).status.providers,[],'no company lines from an older tray app');
+});
+test('company lines of the AIの状況 status are validated one by one',()=> {
+  const p=payload();
+  p.status={tone:'normal',title:'正常',detail:'',page:null,line:'',providers:[{company:'Claude',tone:'normal',detail:''},{company:'OpenAI',tone:'warning',detail:'Codex'.repeat(50)},{company:'',tone:'normal'},{company:'X',tone:'reset'},null,{company:'Y',tone:'unknown',detail:1},{company:'Z',tone:'critical'}]};
+  const s=parseSnapshot(JSON.stringify(p)).status;
+  assert.deepEqual(s.providers.map(x=>[x.company,x.tone,x.detail.length]),[['Claude','normal',0],['OpenAI','warning',180],['Y','unknown',0]]);
+  p.status.providers='x';assert.deepEqual(parseSnapshot(JSON.stringify(p)).status.providers,[]);
 });
 module.exports={payload,now};
 

@@ -11,9 +11,16 @@ const WINDOW_LABEL = /^(5時間|週|週（.{1,24}）)$/u;
 // Only the two fixed status pages may pass, because a key press opens the page in the browser.
 const STATUS_TONES = ['critical', 'warning', 'reset', 'normal', 'unknown'];
 const STATUS_PAGES = ['https://status.claude.com/', 'https://status.openai.com/'];
+// Each company's own state; entries that do not fit are dropped, and at most three are kept.
+const PROVIDER_TONES = ['critical', 'warning', 'normal', 'unknown'];
+function parseProviders(list) {
+  if(!Array.isArray(list)) return [];
+  return list.filter(p=>p && typeof p==='object' && typeof p.company==='string' && p.company.length>0 && PROVIDER_TONES.includes(p.tone)).slice(0,3)
+    .map(p=>({company:text(p.company,20),tone:p.tone,detail:text(p.detail)}));
+}
 function parseStatus(v) {
   if(!v || typeof v!=='object' || Array.isArray(v) || !STATUS_TONES.includes(v.tone)) return null;
-  return {tone:v.tone,title:text(v.title,60),detail:text(v.detail),page:STATUS_PAGES.includes(v.page)?v.page:null,line:text(v.line)};
+  return {tone:v.tone,title:text(v.title,60),detail:text(v.detail),page:STATUS_PAGES.includes(v.page)?v.page:null,line:text(v.line),providers:parseProviders(v.providers)};
 }
 function emptyServices() { return names.map(name => ({name, plan:'', source:'', status:'', recordedAt:null, needsLogin:false, windows:[]})); }
 function parseSnapshot(json) {
