@@ -73,6 +73,11 @@ internal static partial class Tests
             var r = UsageParser.Claude("{}", "max", T, "API");
             Assert(Labels(r) == "週" && !r.HasData && r.Status == "使用量を取得できません");
         });
+        Check("Compact reset text is short enough for narrow columns", () => {
+            Assert(UsageText.CompactReset(UsageWindow.Week(50, T.AddDays(2).AddHours(3)), T) == "2d3h");
+            Assert(UsageText.CompactReset(UsageWindow.Week(50, T.AddMinutes(-1)), T) == "期限経過" && UsageText.CompactReset(UsageWindow.Week(50, null), T) == "時刻不明");
+        });
+        Check("App location has no default when local app data is unknown", () => Assert(AppLocation.DefaultPath("") == null && AppLocation.DefaultPath(null) == null && AppLocation.DefaultPath(@"C:\L").EndsWith(@"AIUsageManager\app-location.json")));
         Check("Tray summary names each window", () => {
             var claude = new ServiceUsage { Name = "Claude" }; claude.Windows.Add(UsageWindow.Week(74, T)); claude.Windows.Add(UsageWindow.Scoped("Fable", 91, T));
             var codex = ServiceUsage.Empty("Codex", ""); codex.Windows[0].Percent = 84;

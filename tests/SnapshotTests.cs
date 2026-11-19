@@ -54,6 +54,17 @@ internal static partial class Tests
             var claude=((object[])((Dictionary<string,object>)new JavaScriptSerializer().DeserializeObject(json))["services"])[0] as Dictionary<string,object>;
             Assert(((object[])claude["windows"]).Length==2 && UsageSnapshot.Disconnected().Contains("\"schemaVersion\":2"));
         });
+        Check("Snapshot with the most windows and long texts stays within the pipe limit",()=> {
+            var values=WidgetCards.Sample(T);string longText=new string('あ',300);
+            foreach(var value in values) {
+                value.Source="オンライン";value.Status="";value.RecordedAt=T;value.Windows.Clear();
+                value.Windows.Add(UsageWindow.FiveHour(96,T.AddHours(3)));value.Windows.Add(UsageWindow.Week(96,T.AddDays(3)));
+                value.Windows.Add(UsageWindow.Scoped("ABCDEFGHIJKLMNOPQRSTUVWX",96,T.AddDays(3)));value.Windows.Add(UsageWindow.Scoped("Second model name 24ch",96,T.AddDays(3)));
+                foreach(var window in value.Windows){window.Alert=new UsageAlert{Title=longText.Substring(0,40),Detail=longText,Threshold=95};window.Pace=new UsagePace{Summary=longText.Substring(0,40),Detail=longText,TargetText="x"};}
+            }
+            string json=UsageSnapshot.Create(values,T,false);
+            Assert(Encoding.UTF8.GetByteCount(json)<=65536&&json.Contains("\"connected\":true")&&json.Contains("ABCDEFGHIJKLMNOPQRSTUVWX"));
+        });
         Check("Snapshot drops expired warning messages while retaining original usage",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[1].Percent=100;
             new UsageAlerts().Observe(values,T,NotificationMode.Off);

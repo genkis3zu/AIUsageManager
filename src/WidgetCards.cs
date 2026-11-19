@@ -47,7 +47,7 @@ namespace AIUsageManager
             foreach(var window in value.Windows)
             {
                 string reset=UsageText.Reset(window,now).Replace("リセットまで ","");
-                string compactReset=reset.Replace("期限経過・再取得待ち","期限経過").Replace("リセット時刻不明","時刻不明").Replace("時間","h").Replace("日","d").Replace("分","m").Replace(" ","");
+                string compactReset=UsageText.CompactReset(window,now);
                 string label=large?window.Label:window.ShortLabel;
                 var windowItems=new List<object>{
                     Text(label+"  "+UsageText.Percent(window.Percent)+(large?"":" · "+compactReset),window.Percent>=80?"attention":"default",false)};
@@ -72,7 +72,10 @@ namespace AIUsageManager
         static object Card(ServiceUsage[] values,DateTimeOffset now,bool large)
         {
             var actions=new List<object>{O("type","Action.Execute","title","更新","verb","refresh")};
-            foreach(var value in values.Where(v=>v.NeedsLogin&&(v.Name=="Claude"||v.Name=="Codex"||v.Name=="Grok")))
+            var logins=values.Where(v=>v.NeedsLogin&&(v.Name=="Claude"||v.Name=="Codex"||v.Name=="Grok")).ToArray();
+            // Three login buttons plus 更新 may not fit the card; then one button opens the tray list, which has each login.
+            if(logins.Length>=3)actions.Add(O("type","Action.Execute","title","ログイン（"+logins.Length+"件）","verb","open"));
+            else foreach(var value in logins)
                 actions.Add(O("type","Action.Execute","title",value.Name+" ログイン","verb","login-"+value.Name.ToLowerInvariant()));
             if(actions.Count==1)actions.Add(O("type","Action.Execute","title","アプリを開く","verb","open"));
             return O("$schema","http://adaptivecards.io/schemas/adaptive-card.json","type","AdaptiveCard","version","1.5",

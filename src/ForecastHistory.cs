@@ -50,7 +50,7 @@ namespace AIUsageManager
         {return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","forecast-history-2.dat");}
         public static string LegacyPath()
         {return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","forecast-history.dat");}
-        static readonly Regex KeyPattern=new Regex(@"^(Claude|Codex|Grok)/(5時間|週|週（[A-Za-z0-9 .+\-()]{1,24}）|週（モデル別）)$");
+        static readonly Regex KeyPattern=new Regex(@"^(Claude|Codex|Grok)/(5時間|週|週（[A-Za-z0-9 .+\-()]{1,24}）|週（モデル別）)\z");
         static bool KnownKey(string key)
         {return key!=null&&KeyPattern.IsMatch(key);}
         internal static string KnownPlan(string plan)

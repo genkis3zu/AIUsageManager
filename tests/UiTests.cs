@@ -96,6 +96,7 @@ internal static class UiTests
                 var paintRow=new UsageRow{Width=388,Height=110};paintRow.Usage=three;
                 using(var image=new Bitmap(388,110))paintRow.DrawToBitmap(image,new Rectangle(0,0,388,110));
                 Assert(paintRow.AccessibleName.Contains("5時間 10%")&&paintRow.AccessibleName.Contains("週 20%")&&paintRow.AccessibleName.Contains("週（Fable） 96%"),"Popup row with three Claude windows paints and names all three");
+                Assert(UsageRow.ResetText(three.Windows[1],3,DateTimeOffset.Now).StartsWith("リセットまで")&&!UsageRow.ResetText(three.Windows[1],4,DateTimeOffset.Now).Contains("リセットまで"),"Popup uses short reset text when four windows share a row");
                 Assert(UsageRow.Caption(three.Windows[2],3)=="Fable"&&UsageRow.Caption(three.Windows[0],3)=="5h"&&UsageRow.Caption(three.Windows[1],2)=="週"&&UsageRow.Caption(UsageWindow.Scoped("Fable",1,null),2)=="週（Fable）","Popup uses short captions only when three or more windows share a row");
                 var single=new ServiceUsage{Name="Claude",Plan="Ultra",Source="オンライン",RecordedAt=DateTimeOffset.Now};single.Windows.Add(UsageWindow.Week(40,DateTimeOffset.Now.AddDays(3)));
                 paintRow.Usage=single;using(var image=new Bitmap(388,110))paintRow.DrawToBitmap(image,new Rectangle(0,0,388,110));

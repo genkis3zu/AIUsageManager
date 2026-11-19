@@ -86,7 +86,7 @@ namespace AIUsageManager
                     catch (IOException) { }
                     catch (UnauthorizedAccessException) { }
                 }
-                return newest ?? ServiceUsage.Empty("Codex", "週の利用記録がありません");
+                return newest ?? ServiceUsage.Empty("Codex", "利用記録がありません");
             }
             catch (IOException) { return ServiceUsage.Empty("Codex", "ログを読み取れません"); }
             catch (UnauthorizedAccessException) { return ServiceUsage.Empty("Codex", "ログを読み取れません"); }

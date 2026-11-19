@@ -72,6 +72,12 @@ namespace AIUsageManager
         }
         public static string Percent(double? value)
         { return value.HasValue ? value.Value.ToString("0.#", CultureInfo.InvariantCulture) + "%" : "未取得"; }
+        // Short form for narrow places (widget medium card, popup with four windows), e.g. "2d3h".
+        public static string CompactReset(UsageWindow window, DateTimeOffset now)
+        {
+            return Reset(window, now).Replace("リセットまで ", "").Replace("期限経過・再取得待ち", "期限経過").Replace("リセット時刻不明", "時刻不明")
+                .Replace("時間", "h").Replace("日", "d").Replace("分", "m").Replace(" ", "");
+        }
         public static string Reset(UsageWindow window, DateTimeOffset now)
         {
             if (!window.ResetsAt.HasValue) return "リセット時刻不明";

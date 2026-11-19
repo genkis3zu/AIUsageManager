@@ -10,7 +10,10 @@ namespace AIUsageManager
     public static class AppLocation
     {
         public static string DefaultPath()
-        { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"AIUsageManager","app-location.json"); }
+        { return DefaultPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)); }
+        // No record when the local app data folder is unknown, rather than a path relative to the current folder.
+        internal static string DefaultPath(string localAppData)
+        { return string.IsNullOrEmpty(localAppData)?null:Path.Combine(localAppData,"AIUsageManager","app-location.json"); }
         public static bool Save(string file,string executablePath)
         {
             try

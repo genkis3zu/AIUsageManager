@@ -30,6 +30,13 @@ internal static partial class Tests
         string json=new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new {version=1,series=new[]{new {key=key,plan=plan,samples=rows}}});
         File.WriteAllBytes(path,System.Security.Cryptography.ProtectedData.Protect(Encoding.UTF8.GetBytes(json),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));
     }
+    static void WriteLegacyHistory(string path,string plan,Dictionary<string,List<ForecastSample>> series)
+    {
+        var epoch=new DateTimeOffset(1970,1,1,0,0,0,TimeSpan.Zero);
+        var entries=series.Select(s=>new {key=s.Key,plan=plan,samples=s.Value.Select(p=>new[]{(p.At-epoch).TotalSeconds,p.Percent,(p.Reset-epoch).TotalSeconds}).ToArray()}).ToArray();
+        string json=new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new {version=1,series=entries});
+        File.WriteAllBytes(path,System.Security.Cryptography.ProtectedData.Protect(Encoding.UTF8.GetBytes(json),null,System.Security.Cryptography.DataProtectionScope.CurrentUser));
+    }
     static ServiceUsage ClaudeWindow(UsageWindow window,DateTimeOffset at)
     {
         var value=new ServiceUsage{Name="Claude",Plan="Ultra",Source="オンライン",RecordedAt=at};value.Windows.Add(window);return value;
@@ -153,6 +160,19 @@ internal static partial class Tests
             history.Record("Claude/週","Ultra",new ForecastSample{At=T.AddHours(1),Percent=points.Last().Percent+1,Reset=points.Last().Reset});
             Assert(history.Series["Claude/週"].Samples.Count==points.Count+1);
             Assert(ForecastHistory.KnownPlan("Max 5x")=="Max"&&ForecastHistory.KnownPlan("Max 20x")=="Ultra");
+        });
+        Check("Legacy 5時間 and 週 series both carry over with the Ultra rename",()=> {
+            var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");
+            var weekly=Routine(T.AddDays(-3),72,t=>0.2);
+            var session=new List<ForecastSample>();for(int i=0;i<12;i++)session.Add(new ForecastSample{At=T.AddMinutes(-60+5*i),Percent=i,Reset=T.AddHours(4)});
+            WriteLegacyHistory(legacy,"Max 20x",new Dictionary<string,List<ForecastSample>>{{"Claude/週",weekly},{"Claude/5時間",session}});
+            var history=new ForecastHistory(current,T,legacy);
+            Assert(history.Series["Claude/週"].Samples.Count==weekly.Count&&history.Series["Claude/5時間"].Samples.Count==session.Count);
+            Assert(history.Series["Claude/週"].Plan=="Ultra"&&history.Series["Claude/5時間"].Plan=="Ultra");
+        });
+        Check("History keys with a trailing line break are rejected",()=> {
+            var history=new ForecastHistory(null,T);var sample=new ForecastSample{At=T,Percent=1,Reset=T.AddDays(1)};
+            Assert(history.Record("Claude/週\n","Ultra",sample)==null&&history.Record("Claude/週","Ultra",sample)!=null);
         });
         Check("Saving never writes the legacy history file",()=> {
             var root=Fixture();string legacy=Path.Combine(root,"forecast-history.dat"),current=Path.Combine(root,"forecast-history-2.dat");

@@ -54,6 +54,13 @@ internal static partial class Tests
             Assert(WidgetCards.Create(values,T).Contains("\"verb\":\"login-claude\"")&&WidgetCards.Create(values,T).Contains("Claude ログイン"));
             values[0].NeedsLogin=false;Assert(!WidgetCards.Create(values,T).Contains("login-claude"));
         });
+        Check("Widget with three logins needed offers one button that opens the app",()=> {
+            var values=WidgetValues();foreach(var value in values)value.NeedsLogin=true;
+            string card=WidgetCards.Create(values,T);
+            Assert(!card.Contains("login-claude")&&!card.Contains("login-codex")&&!card.Contains("login-grok")&&card.Contains("\"verb\":\"open\"")&&card.Contains("ログイン（3件）"));
+            values[2].NeedsLogin=false;card=WidgetCards.Create(values,T);
+            Assert(card.Contains("login-claude")&&card.Contains("login-codex")&&!card.Contains("login-grok"));
+        });
         Check("Widget high usage uses attention text",()=>Assert(WidgetCards.Create(WidgetValues(),T).Contains("\"color\":\"attention\"")));
         Check("Widget keeps original observation time",()=> {
             string json=WidgetCards.Create(WidgetValues(),T);Assert(json.Contains(T.AddHours(-1).ToLocalTime().ToString("MM/dd HH:mm"))&&json.Contains("CLI 記録"));

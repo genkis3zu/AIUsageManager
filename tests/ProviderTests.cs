@@ -20,6 +20,7 @@ internal static partial class Tests
         public bool SettingsWaitForCancellation;
         public string CodexBody = "{\"plan_type\":\"prolite\",\"rate_limit\":{\"primary_window\":{\"used_percent\":7,\"limit_window_seconds\":604800,\"reset_at\":1791952268}}}";
         public HttpStatusCode Status = HttpStatusCode.OK;
+        public string ClaudeBody = "{\"five_hour\":{\"utilization\":1},\"seven_day\":{\"utilization\":98}}";
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Interlocked.Increment(ref Calls);
@@ -37,7 +38,7 @@ internal static partial class Tests
                 return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status == HttpStatusCode.OK ? CodexBody : "sensitive-server-error") });
             }
             HeadersCorrect &= claude ? request.Headers.Contains("anthropic-beta") : request.RequestUri.Host == "cli-chat-proxy.grok.com" && request.Headers.Contains("X-XAI-Token-Auth");
-            return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status != HttpStatusCode.OK ? "sensitive-server-error" : claude ? "{\"five_hour\":{\"utilization\":1},\"seven_day\":{\"utilization\":98}}" : "{\"subscriptionTier\":"+(OmitPlan?"null":"\"SuperGrok Heavy\"")+",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"weekly\"}}}") });
+            return Task.FromResult(new HttpResponseMessage(Status) { Content = new StringContent(Status != HttpStatusCode.OK ? "sensitive-server-error" : claude ? ClaudeBody : "{\"subscriptionTier\":"+(OmitPlan?"null":"\"SuperGrok Heavy\"")+",\"config\":{\"creditUsagePercent\":42,\"currentPeriod\":{\"type\":\"weekly\"}}}") });
         }
         static async Task<HttpResponseMessage> WaitForSettingsCancellation(CancellationToken token)
         { await Task.Delay(Timeout.Infinite,token);return new HttpResponseMessage(HttpStatusCode.OK); }
@@ -97,6 +98,20 @@ internal static partial class Tests
             foreach(var status in new[]{(HttpStatusCode)429,HttpStatusCode.Forbidden,HttpStatusCode.InternalServerError}) {
                 var root=Fixture();Auth(root);
                 using(var http=new HttpClient(new FakeHttp{Status=status})) Assert(!new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0].NeedsLogin);
+            }
+        });
+        Check("Codex without usable session records says so without naming one window", () => {
+            var root=Fixture();var value=FileSources.Codex(root);
+            Assert(value.Status=="利用記録がありません" && !value.HasData);
+        });
+        Check("Claude network failure, empty answers and cached 429/403 do not ask for login", () => {
+            var root=Fixture();Auth(root);
+            using(var http=new HttpClient(new ThrowingHttp())) Assert(!new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0].NeedsLogin);
+            var empty=Fixture();Auth(empty);
+            using(var http=new HttpClient(new FakeHttp{ClaudeBody="{}"})) {var value=new UsageService(empty,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(!value.NeedsLogin && value.Status.Contains("返りませんでした"));}
+            foreach(var status in new[]{(HttpStatusCode)429,HttpStatusCode.Forbidden}) {
+                var cached=Fixture();Auth(cached);File.WriteAllText(Path.Combine(cached,".claude","usage-cache.json"),"{\"timestamp\":\"2026-10-10T09:00:00Z\",\"rate_limits\":{\"seven_day\":{\"used_percentage\":9}}}");
+                using(var http=new HttpClient(new FakeHttp{Status=status})) {var value=new UsageService(cached,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[0];Assert(value.Windows[0].Percent==9 && !value.NeedsLogin && value.Status=="オンライン未取得・保存値を表示");}
             }
         });
         Check("Codex npm installation launches its bundled native CLI", () => {
@@ -300,6 +315,11 @@ internal static partial class Tests
             var root=Fixture();File.WriteAllText(Path.Combine(root,".claude","usage-cache.json"),"{\"timestamp\":\"2026-10-10T09:00:00Z\",\"rate_limits\":{\"five_hour\":{\"used_percentage\":9}}}");
             using(var http=new HttpClient(new FakeHttp())) {var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();Assert(values[0].Windows[0].Percent==9 && values[0].RecordedAt==T && values[0].Source.Contains("キャッシュ"));}
         });
+    }
+    sealed class ThrowingHttp : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        { throw new HttpRequestException("fixture network failure"); }
     }
     static void CodexAuth(string root)
     { File.WriteAllText(Path.Combine(root,".codex","auth.json"),"{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"fixture-codex\",\"account_id\":\"fixture-account\",\"refresh_token\":\"never-use\"}}"); }

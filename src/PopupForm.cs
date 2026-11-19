@@ -30,6 +30,8 @@ namespace AIUsageManager
         internal static bool ShowsLogin(ServiceUsage value) { return value.NeedsLogin&&(value.Name=="Claude"||value.Name=="Codex"||value.Name=="Grok"); }
         // Full names fit two columns; with three or more windows the short names (5h, 週, Fable) are used.
         internal static string Caption(UsageWindow window,int count) { return count>=3?window.ShortLabel:window.Label; }
+        // Four columns are too narrow for "リセットまで 2日 3時間"; use the short form there.
+        internal static string ResetText(UsageWindow window,int count,DateTimeOffset now) { return count>=4?UsageText.CompactReset(window,now):UsageText.Reset(window,now); }
         public UsageRow() {
             DoubleBuffered=true;BackColor=Color.White;AccessibleRole=AccessibleRole.Grouping;TabStop=false;
             login.FlatAppearance.BorderSize=0;Controls.Add(login);
@@ -73,11 +75,12 @@ namespace AIUsageManager
                 float labelWidth=caption.Length<=3?(count==1?25:35):(count>=3?42:Math.Min(column-90,10+caption.Length*9));
                 Artwork.Text(g,caption,11,false,palette.Muted,new RectangleF(left,41,labelWidth,20),false);
                 Artwork.Text(g,UsageText.Percent(w.Percent),12,true,w.Percent.HasValue?fill:palette.Muted,new RectangleF(left+column-60,40,51,20),true);
-                float barLeft=left+labelWidth+1,barWidth=Math.Max(6,column-labelWidth-59);
-                if(w.Percent.HasValue)Artwork.Pill(g,palette.Track,new RectangleF(barLeft,49,barWidth,5));
-                if(w.Percent.HasValue && w.Percent>0)Artwork.Pill(g,fill,new RectangleF(barLeft,49,(float)(barWidth*Math.Min(100,w.Percent.Value)/100),5));
-                if(!w.Percent.HasValue)Artwork.Text(g,"—",10,false,palette.Muted,new RectangleF(barLeft,41,barWidth,18),false);
-                Artwork.Text(g,UsageText.Reset(w,DateTimeOffset.Now),10,false,expired?palette.Red:palette.Muted,new RectangleF(left,63,column-6,18),false);
+                // A bar shorter than 12 px only looks like a dot; the percentage alone is clearer then.
+                float barLeft=left+labelWidth+1,barWidth=column-labelWidth-59;bool bar=barWidth>=12;
+                if(bar&&w.Percent.HasValue)Artwork.Pill(g,palette.Track,new RectangleF(barLeft,49,barWidth,5));
+                if(bar&&w.Percent.HasValue && w.Percent>0)Artwork.Pill(g,fill,new RectangleF(barLeft,49,(float)(barWidth*Math.Min(100,w.Percent.Value)/100),5));
+                if(bar&&!w.Percent.HasValue)Artwork.Text(g,"—",10,false,palette.Muted,new RectangleF(barLeft,41,barWidth,18),false);
+                Artwork.Text(g,ResetText(w,count,DateTimeOffset.Now),10,false,expired?palette.Red:palette.Muted,new RectangleF(left,63,column-6,18),false);
             }
             string stamp=Stamp(usage);
             bool old=usage.RecordedAt.HasValue && DateTimeOffset.Now-usage.RecordedAt.Value>TimeSpan.FromMinutes(15);

@@ -16,6 +16,9 @@
 **/usage-cache.json
 **/forecast-history.dat
 **/forecast-history.dat.tmp
+**/forecast-history-2.dat
+**/forecast-history-2.dat.tmp
+**/app-location.json
 *.jsonl
 *.log
 *.pfx
