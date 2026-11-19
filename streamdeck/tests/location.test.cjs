@@ -58,6 +58,15 @@ test('launch passes no arguments, detached, no shell, in the app folder', async 
   assert.deepEqual(call, ['C:\\Apps\\AIUsageManager.exe', [], { shell: false, detached: true, stdio: 'ignore', windowsHide: false, cwd: 'C:\\Apps' }]);
   assert.equal(unref, 1);
 });
+test('launch passes only the three login arguments', async () => {
+  const calls = [];
+  const spawn = (...args) => { calls.push(args[1]); const child = new EventEmitter(); child.unref = () => {}; queueMicrotask(() => child.emit('spawn')); return child; };
+  for (const arg of ['--login-claude', '--login-codex', '--login-grok']) await launchApp('C:\\Apps\\AIUsageManager.exe', spawn, [arg]);
+  assert.deepEqual(calls, [['--login-claude'], ['--login-codex'], ['--login-grok']]);
+  const never = () => { throw new Error('unexpected spawn'); };
+  for (const args of [['--refresh'], ['--login-claude', '--login-codex'], ['--login-claude x'], 'x'])
+    await assert.rejects(launchApp('C:\\Apps\\AIUsageManager.exe', never, args), /Invalid app arguments/);
+});
 test('launch failure rejects', async () => {
   const spawn = () => { const child = new EventEmitter(); child.unref = () => {}; queueMicrotask(() => child.emit('error', new Error('ENOENT'))); return child; };
   await assert.rejects(launchApp('C:\\Apps\\AIUsageManager.exe', spawn));

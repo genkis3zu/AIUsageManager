@@ -96,11 +96,13 @@ test('fresh 92% is warning and 96% is critical', () => {
 });
 test('needsLogin Grok shows 要ログイン', () => {
   const v = view('Grok', { status: '再ログインが必要です', needsLogin: { Grok: true } });
-  assert.equal(v.kind, 'message'); assert.equal(v.message, '要ログイン');
+  assert.equal(v.kind, 'message'); assert.equal(v.message, '要ログイン'); assert.equal(v.needsLogin, true);
+  assert.equal(view('Grok').needsLogin, false);
+  assert.equal(keyView('Grok', initialConnection(), defaultSettings('Grok'), NOW).needsLogin, false);
 });
 test('needsLogin with recorded values keeps the bars and says 要ログイン', () => {
   const v = view('Codex', { needsLogin: { Codex: true }, status: 'ChatGPT ログインが必要です・CLI 記録を表示' });
-  assert.equal(v.kind, 'usage'); assert.equal(v.caption, '要ログイン'); assert.equal(v.tone, 'muted');
+  assert.equal(v.kind, 'usage'); assert.equal(v.caption, '要ログイン'); assert.equal(v.tone, 'muted'); assert.equal(v.needsLogin, true);
 });
 test('showReset false hides reset text', () => {
   assert.equal(view('Codex', {}, { showReset: false }).bars[0].reset, '');

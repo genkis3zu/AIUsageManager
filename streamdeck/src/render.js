@@ -6,13 +6,13 @@ const shorten = text => { const chars = Array.from(text || ''); return chars.len
 
 // What one key shows, decided from the shared snapshot with the same rules as the Obsidian toolbar.
 function keyView(name, connection, settings, now) {
-  const base = { title: name, kind: 'message', message: '', caption: '', tone: 'muted', bars: [] };
+  const base = { title: name, kind: 'message', message: '', caption: '', tone: 'muted', bars: [], needsLogin: false };
   if (connection.status === 'loading') return { ...base, kind: 'loading', message: '読み込み中' };
   if (connection.status !== 'connected' || !connection.snapshot) return { ...base, message: '未接続' };
   const service = connection.snapshot.services.find(s => s.name === name);
   if (!service) return { ...base, message: '未取得' };
   const presented = presentService(service, true, now);
-  if (presented.windows.every(w => w.percent === null)) return { ...base, message: service.needsLogin ? '要ログイン' : '未取得' };
+  if (presented.windows.every(w => w.percent === null)) return { ...base, message: service.needsLogin ? '要ログイン' : '未取得', needsLogin: service.needsLogin === true };
   // A window with neither a percent nor a reset time was not reported by the service at all
   // (Claude no longer returns a 5-hour window), so it is left out when another window has data.
   const reported = presented.windows.filter(w => w.percent !== null || w.resetsAt !== null);
@@ -25,7 +25,7 @@ function keyView(name, connection, settings, now) {
     return { label: w.label, short: w.shortLabel, value, text: value === null ? '未取得' : Math.round(value) + '%', reset: settings.showReset ? w.reset : '', tone };
   });
   const caption = service.needsLogin ? '要ログイン' : presented.severity === 'muted' ? shorten(presented.state) : '';
-  return { ...base, kind: 'usage', tone: presented.severity, caption, bars };
+  return { ...base, kind: 'usage', tone: presented.severity, caption, bars, needsLogin: service.needsLogin === true };
 }
 
 const FONT = "'Segoe UI','Yu Gothic UI','Meiryo',sans-serif";

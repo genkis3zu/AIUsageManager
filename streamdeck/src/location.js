@@ -27,12 +27,16 @@ function resolveAppPath(manualPath, file, fs = nodeFs) {
   return readAppLocation(file, fs);
 }
 
+// The only arguments the plugin may pass: ask the tray app to start one service's official login.
+const LOGIN_ARGUMENTS = ['--login-claude', '--login-codex', '--login-grok'];
+
 // Detached so the tray app keeps running when Stream Deck or this plugin exits. The working directory is
 // the app's own folder: inheriting the plugin folder would keep it locked and break plugin updates.
-function launchApp(file, spawn = childProcess.spawn) {
+function launchApp(file, spawn = childProcess.spawn, args = []) {
   if (!validPath(file)) return Promise.reject(new Error('Invalid app path'));
+  if (!Array.isArray(args) || args.length > 1 || args.some(a => !LOGIN_ARGUMENTS.includes(a))) return Promise.reject(new Error('Invalid app arguments'));
   return new Promise((resolve, reject) => {
-    const child = spawn(file, [], { shell: false, detached: true, stdio: 'ignore', windowsHide: false, cwd: path.win32.dirname(file) });
+    const child = spawn(file, args, { shell: false, detached: true, stdio: 'ignore', windowsHide: false, cwd: path.win32.dirname(file) });
     child.once('error', () => reject(new Error('Unable to launch app')));
     child.once('spawn', () => { child.unref(); resolve(); });
   });

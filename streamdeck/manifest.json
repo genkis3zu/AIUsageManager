@@ -1,6 +1,6 @@
 {
   "Name": "AI Usage Manager",
-  "Version": "1.1.1.0",
+  "Version": "1.1.2.0",
   "Author": "AI Usage Manager contributors",
   "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量を表示します。このプラグイン自身はAIサービスに問い合わせません。",
   "URL": "https://github.com/genkis3zu/AIUsageManager",

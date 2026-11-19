@@ -12,7 +12,7 @@ const SNAP = JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: RE
 const appear = (context, action = ID + '.codex', settings = {}) => ({ event: 'willAppear', action, context, payload: { settings } });
 
 function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', launch = async () => {} } = {}) {
-  const sent = [], resolveCalls = [], launches = [];
+  const sent = [], resolveCalls = [], launches = [], launchArgs = [];
   let clock = 1000, readCount = 0;
   const deck = { setImage: (c, svg) => sent.push(['image', c, svg]), setSettings: (c, s) => sent.push(['settings', c, s]), showAlert: c => sent.push(['alert', c]) };
   const timers = {
@@ -25,9 +25,9 @@ function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', l
   const plugin = createPlugin({
     deck, pipe: 'PIPE', readSnapshot, now: () => clock, timers,
     resolveAppPath: manual => { resolveCalls.push(manual); return resolve(manual); },
-    launchApp: async file => { launches.push(file); return launch(file); },
+    launchApp: async (file, args) => { launches.push(file); launchArgs.push(args || []); return launch(file); },
   });
-  return { plugin, sent, timers, resolveCalls, launches, reads: () => readCount, tick: ms => { clock += ms; },
+  return { plugin, sent, timers, resolveCalls, launches, launchArgs, reads: () => readCount, tick: ms => { clock += ms; },
     images: context => sent.filter(s => s[0] === 'image' && s[1] === context).map(s => s[2]),
     settings: context => sent.filter(s => s[0] === 'settings' && s[1] === context).map(s => s[2]) };
 }
@@ -88,6 +88,36 @@ test('keyUp without keyDown is a short press', async () => {
   await h.plugin.handle(appear('k1'));
   await h.plugin.handle({ event: 'keyUp', context: 'k1' });
   assert.equal(h.settings('k1').at(-1).style, 'horizontal');
+});
+const LOGIN_SNAP = (() => { const s = JSON.parse(SNAP); s.services[1].needsLogin = true; s.services[1].status = 'ChatGPT ログインが必要です'; s.services[2].needsLogin = true; s.services[2].windows[0].percent = null; return JSON.stringify(s); })();
+test('a short press on a 要ログイン key starts that service login through the tray app', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: LOGIN_SNAP }] });
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('k2', ID + '.grok'));
+  assert.ok(h.images('k1').at(-1).includes('要ログイン')); assert.ok(h.images('k2').at(-1).includes('要ログイン'));
+  const before = h.settings('k1').length;
+  await press(h, 'k1', 100); await press(h, 'k2', 100);
+  assert.deepEqual(h.launchArgs, [['--login-codex'], ['--login-grok']]);
+  assert.equal(h.settings('k1').length, before);
+});
+test('a long press on a 要ログイン key still changes the colour', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: LOGIN_SNAP }] });
+  await h.plugin.handle(appear('k1'));
+  await press(h, 'k1', 600);
+  assert.deepEqual(h.launchArgs, []); assert.equal(h.settings('k1').at(-1).palette, 'orange');
+});
+test('a 要ログイン press without a usable tray app shows アプリの場所を設定', async () => {
+  for (const options of [{ resolve: () => null }, { launch: async () => { throw new Error('nope'); } }]) {
+    const h = harness({ reads: [{ kind: 'ok', json: LOGIN_SNAP }], ...options });
+    await h.plugin.handle(appear('k1'));
+    await press(h, 'k1', 100);
+    assert.ok(h.images('k1').at(-1).includes('アプリの場所を設定'));
+  }
+});
+test('keys that do not need login keep cycling the style on a short press', async () => {
+  const h = harness();
+  await h.plugin.handle(appear('k1'));
+  await press(h, 'k1', 100);
+  assert.deepEqual(h.launchArgs, []); assert.equal(h.settings('k1').at(-1).style, 'horizontal');
 });
 test('disconnected press launches the resolved path and polls again after 2 s', async () => {
   const h = harness({ reads: [{ kind: 'absent' }] });

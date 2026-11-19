@@ -21,6 +21,7 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     const key = keys.get(context);
     if (!key) return;
     const view = key.notice ? message(key, key.notice) : starting ? message(key, '起動中') : keyView(key.service, connection, key.settings, now());
+    if (!key.notice && !starting) key.needsLogin = view.needsLogin === true;
     const svg = renderKey(view, key.settings);
     if (svg === key.lastImage) return;
     key.lastImage = svg;
@@ -65,6 +66,13 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
           if (i === RELAUNCH_POLLS_MS.length - 1 && starting) { starting = false; renderAll(); }
         }));
       }, ms));
+      return;
+    }
+    // A key showing 要ログイン starts that service's official login through the tray app.
+    if (!long && key.needsLogin) {
+      const file = resolveAppPath(manualPath);
+      if (!file) { showNotice(context); return; }
+      try { await launchApp(file, ['--login-' + key.service.toLowerCase()]); } catch { showNotice(context); }
       return;
     }
     key.settings = long ? { ...key.settings, palette: nextPalette(key.settings.palette) } : { ...key.settings, style: nextStyle(key.settings.style) };
@@ -130,7 +138,7 @@ function main() {
   const plugin = createPlugin({
     deck, pipe: pipeName(userSid()), readSnapshot,
     resolveAppPath: manual => location.resolveAppPath(manual, file),
-    launchApp: location.launchApp,
+    launchApp: (file, args) => location.launchApp(file, undefined, args),
     timers: { setInterval, clearInterval, setTimeout },
   });
   for (const event of ['willAppear', 'willDisappear', 'didReceiveSettings', 'didReceiveGlobalSettings', 'keyDown', 'keyUp'])
