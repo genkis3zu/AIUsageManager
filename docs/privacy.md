@@ -33,7 +33,7 @@ Grokのプラン名は請求情報の取得成功後、最大2秒の追加GETで
 
 ## ユーザーが開始するログイン
 
-Codex・Grokの「ログイン」ボタンは、インストール済みの公式CLIを起動します。引数は `codex.exe login` または `grok.exe login --oauth` に固定し、認証情報をコマンド引数に含めません。CLIの出力をキャプチャ・保存しません。既知のユーザー別インストール先と絶対パスのPATHから実行ファイルを探し、シェル文字列として実行しません。
+Claude・Codex・Grokの「ログイン」ボタンは、インストール済みの公式CLIを起動します。引数は `claude.exe auth login --claudeai`、`codex.exe login`、`grok.exe login --oauth` に固定し、認証情報をコマンド引数に含めません。Claude Codeは公式インストーラーの置き場所 `%USERPROFILE%\.local\bin\claude.exe` を先に探します。Stream Deckプラグインからのログインは、トレイアプリを `--login-claude`・`--login-codex`・`--login-grok` のどれかの引数で起動するだけで、プラグインはそれ以外の引数を使いません。CLIの出力をキャプチャ・保存しません。既知のユーザー別インストール先と絶対パスのPATHから実行ファイルを探し、シェル文字列として実行しません。
 
 認証中は公式CLIのウィンドウとブラウザが開きます。認証ファイルの保存・更新やOAuth通信は公式CLIが行います。AI Usage Manager自身はトークンを保存せず、CLI終了後に上記ファイルを読み直します。定期更新がログインを自動起動することはありません。
 
