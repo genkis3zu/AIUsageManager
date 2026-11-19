@@ -34,7 +34,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量を表示します。
 | 未取得 | 値がありません。取得済みの0%とは区別します |
 | 色を落とした値と「保存された値」など | 15分以上前の値、または取得に失敗した値です。現在の値としては扱いません |
 | 色を落とした値と「期限経過」 | リセット時刻を過ぎた枠の、リセット前の値です。トレイアプリの次の取得で新しい値に変わります |
-| 黄色・赤の値 | 上限が近い状態です（90%以上・95%以上） |
+| 黄色・赤の値 | 上限が近い状態です。90%以上で黄色、95%以上で赤になります。トレイアプリの予測で、リセット前に上限に届く見込みのときも黄色になります |
 | 要ログイン | ログインが必要です。キーを短く押すと、トレイアプリがそのサービスの公式ログイン（ブラウザでの認証）を始めます |
 | 未接続 | トレイアプリが起動していません |
 | 起動中 | キーを押してトレイアプリを起動し、値を待っています |
@@ -60,7 +60,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量を表示します。
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.1.2-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.1.3-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。

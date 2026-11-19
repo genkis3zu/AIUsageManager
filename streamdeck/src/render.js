@@ -33,7 +33,9 @@ const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const text = (x, y, value, size, fill, weight = 400, anchor = 'middle') =>
   `<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${esc(value)}</text>`;
 const fraction = value => value === null ? 0 : Math.max(0, Math.min(100, value)) / 100;
-const caption = bar => bar.short || bar.label;
+// Names come from the service; cut them to what fits the layout (12, 8 or 5 characters for 1, 2 or 3 bars).
+const fit = (value, max) => { const chars = Array.from(value || ''); return chars.length > max ? chars.slice(0, max - 1).join('') + '…' : chars.join(''); };
+const caption = (bar, n) => fit(bar.short || bar.label, n === 3 ? 5 : n === 2 ? 8 : 12);
 
 const toneColor = (palette, tone) => ({ normal: palette.accent, warning: palette.warning, critical: palette.critical }[tone] || palette.muted);
 
@@ -42,22 +44,22 @@ function vertical(view, palette) {
   const n = view.bars.length, three = n === 3, xs = n === 1 ? [72] : n === 2 ? [44, 100] : [30, 72, 114], w = three ? 18 : 22;
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), x = xs[i], height = 54, top = 40, fill = Math.round(height * fraction(bar.value));
-    return text(x, 35, caption(bar), three ? 10 : 11, palette.muted) +
+    return text(x, 35, caption(bar, n), 11, palette.muted) +
       `<rect x="${x - w / 2}" y="${top}" width="${w}" height="${height}" rx="5" fill="${palette.track}"/>` +
       (fill > 0 ? `<rect x="${x - w / 2}" y="${top + height - fill}" width="${w}" height="${fill}" rx="5" fill="${color}"/>` : '') +
-      text(x, 114, bar.text, bar.value === null ? (three ? 10 : 13) : (three ? 14 : 17), bar.value === null ? palette.muted : color, 700) +
-      (view.caption ? '' : text(x, 133, bar.reset, three ? 9 : 11, palette.muted));
+      text(x, 114, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 15 : 17), bar.value === null ? palette.muted : color, 700) +
+      (view.caption ? '' : text(x, 133, bar.reset, three ? 10 : 11, palette.muted));
   }).join('');
 }
 function horizontal(view, palette) {
   const n = view.bars.length, three = n === 3, rows = n === 1 ? [62] : n === 2 ? [46, 92] : [34, 68, 102];
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value)), h = three ? 7 : 9;
-    return text(12, y, caption(bar), three ? 11 : 12, palette.muted, 400, 'start') +
+    return text(12, y, caption(bar, n), three ? 11 : 12, palette.muted, 400, 'start') +
       text(132, y, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 14 : 17), bar.value === null ? palette.muted : color, 700, 'end') +
       `<rect x="12" y="${y + 5}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
       (fill > 0 ? `<rect x="12" y="${y + 5}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') +
-      (view.caption || !bar.reset ? '' : text(12, y + (three ? 23 : 29), (three ? '' : 'リセット ') + bar.reset, three ? 9 : 11, palette.muted, 400, 'start'));
+      (view.caption || !bar.reset ? '' : text(12, y + (three ? 23 : 29), (three ? '' : 'リセット ') + bar.reset, three ? 10 : 11, palette.muted, 400, 'start'));
   }).join('');
 }
 function ring(view, palette) {
@@ -66,12 +68,12 @@ function ring(view, palette) {
   const circumference = 2 * Math.PI * r;
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), x = xs[i], arc = (circumference * fraction(bar.value)).toFixed(1);
-    const size = single ? (bar.value === null ? 13 : 19) : three ? (bar.value === null ? 8 : 11) : (bar.value === null ? 10 : 14);
+    const size = single ? (bar.value === null ? 13 : 19) : three ? (bar.value === null ? 10 : 11) : (bar.value === null ? 10 : 14);
     return `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${palette.track}" stroke-width="${stroke}"/>` +
       (bar.value ? `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${arc} ${circumference.toFixed(1)}" transform="rotate(-90 ${x} ${cy})"/>` : '') +
       text(x, cy + (single ? 6 : 4), bar.text, size, bar.value === null ? palette.muted : color, 700) +
-      (single ? '' : text(x, cy + r + 15, caption(bar), three ? 10 : 11, palette.muted)) +
-      (view.caption || !bar.reset ? '' : text(x, 136, bar.reset, three ? 9 : 11, palette.muted));
+      (single ? '' : text(x, cy + r + 15, caption(bar, n), three ? 10 : 11, palette.muted)) +
+      (view.caption || !bar.reset ? '' : text(x, 136, bar.reset, three ? 10 : 11, palette.muted));
   }).join('');
 }
 

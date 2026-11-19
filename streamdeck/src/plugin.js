@@ -33,7 +33,8 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     if (pending) return pending;
     pending = (async () => {
       let result;
-      try { result = await read(pipe); } catch { result = { kind: 'failed' }; }
+      // The pipe name may be a function: the Windows user SID is looked up again until it is found.
+      try { result = await read(typeof pipe === 'function' ? pipe() : pipe); } catch { result = { kind: 'failed' }; }
       connection = nextConnection(connection, result);
       if (connection.status === 'connected') starting = false;
       pending = null;
@@ -134,9 +135,10 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const deck = new StreamDeck(args);
+  let sid = null;
   const file = location.locationFile();
   const plugin = createPlugin({
-    deck, pipe: pipeName(userSid()), readSnapshot,
+    deck, pipe: () => { if (!sid) sid = userSid(); return pipeName(sid); }, readSnapshot,
     resolveAppPath: manual => location.resolveAppPath(manual, file),
     launchApp: (file, args) => location.launchApp(file, undefined, args),
     timers: { setInterval, clearInterval, setTimeout },

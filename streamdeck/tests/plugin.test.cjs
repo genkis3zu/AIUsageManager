@@ -33,6 +33,16 @@ function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', l
 }
 async function press(h, context, ms) { await h.plugin.handle({ event: 'keyDown', context }); h.tick(ms); await h.plugin.handle({ event: 'keyUp', context }); }
 
+test('a pipe name that could not be found is looked up again on the next poll', async () => {
+  const names = [null, 'PIPE'], seen = [];
+  const deck = { setImage() {}, setSettings() {}, showAlert() {} };
+  const timers = { setInterval: () => ({}), clearInterval() {}, setTimeout() {} };
+  const plugin = createPlugin({ deck, pipe: () => names.shift(), now: () => 1000, timers, resolveAppPath: () => null, launchApp: async () => {},
+    readSnapshot: async name => { seen.push(name); return name ? { kind: 'ok', json: SNAP } : { kind: 'absent' }; } });
+  await plugin.handle(appear('k1'));
+  await plugin.poll();
+  assert.deepEqual(seen, [null, 'PIPE']);
+});
 test('first key polls immediately and starts one 15 s timer', async () => {
   const h = harness();
   await h.plugin.handle(appear('k1'));

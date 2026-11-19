@@ -16,7 +16,7 @@ test('build writes exactly the plugin files', () => {
 });
 test('manifest has the plugin identity, Node 24 and three key actions', () => {
   const m = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
-  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.1.2.0');
+  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.1.3.0');
   assert.equal(m.CodePath, 'bin/plugin.cjs'); assert.deepEqual(m.Nodejs, { Version: '24' }); assert.equal(m.SDKVersion, 2);
   assert.equal(m.Software.MinimumVersion, '7.6'); assert.deepEqual(m.OS, [{ Platform: 'windows', MinimumVersion: '10' }]);
   assert.equal(m.Icon, 'imgs/plugin'); assert.equal(m.CategoryIcon, 'imgs/category'); assert.equal(m.Category, 'AI Usage Manager');
@@ -32,8 +32,13 @@ test('the bundle loads without connecting and exports the plugin', () => {
 });
 test('the bundle has no network or credential access', () => {
   const text = fs.readFileSync(path.join(out, 'bin', 'plugin.cjs'), 'utf8').replaceAll('http://www.w3.org/2000/svg', '');
-  for (const banned of ['http://', 'https://', 'node:http', 'node:https', 'node:tls', 'node:dns', 'fetch(', '.credentials.json', 'auth.json'])
+  for (const banned of ['http://', 'https://', 'wss://', 'node:http', 'node:https', 'node:tls', 'node:dns', 'node:dgram', 'fetch(', 'XMLHttpRequest', '.credentials.json', 'auth.json'])
     assert.ok(!text.includes(banned), banned);
+  // The only WebSocket address is Stream Deck's own on this PC.
+  const sockets = [...text.matchAll(/ws:\/\/[^'"`\s]*/g)].map(m => m[0]);
+  assert.ok(sockets.length > 0 && sockets.every(s => s.startsWith('ws://127.0.0.1:')), sockets.join(' '));
+  // node:net is used only for the named pipe (connect with a path, never host/port).
+  assert.ok(!/host\s*:/.test(text) && !/\.connect\(\s*\d/.test(text));
 });
 test('the settings panel offers every palette and loads nothing external', () => {
   const html = fs.readFileSync(path.join(out, 'ui', 'settings.html'), 'utf8'), js = fs.readFileSync(path.join(out, 'ui', 'settings.js'), 'utf8');

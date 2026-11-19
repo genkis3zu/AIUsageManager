@@ -45,6 +45,22 @@ test('Claude Max shows 5h, 週 and Fable bars in every style', () => {
     assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="144" height="144" viewBox="0 0 144 144">/);
   }
 });
+test('long model names are shortened to fit each layout', () => {
+  const three = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（VeryLongModelName）', 30]] });
+  const two = view('Claude', { claudeWindows: [['週', 20], ['週（VeryLongModelName）', 30]] });
+  for (const style of STYLES) {
+    const svg3 = renderKey(three, { ...defaultSettings('Claude'), style }), svg2 = renderKey(two, { ...defaultSettings('Claude'), style });
+    assert.ok(svg3.includes('>Very…<') && !svg3.includes('VeryLongModelName'), style + ' three');
+    assert.ok(svg2.includes('>VeryLon…<') && !svg2.includes('VeryLongModelName'), style + ' two');
+  }
+});
+test('three-bar keys use text of at least 10 px in every style', () => {
+  const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] });
+  for (const style of STYLES) {
+    const sizes = [...renderKey(v, { ...defaultSettings('Claude'), style }).matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
+    assert.ok(sizes.length > 0 && Math.min(...sizes) >= 10, style + ' ' + sizes);
+  }
+});
 test('a fourth window is not drawn', () => {
   const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 30], ['週（Other）', 40]] });
   assert.deepEqual(v.bars.map(b => b.short), ['5h', '週', 'Fable']);
