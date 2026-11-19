@@ -17,7 +17,7 @@ namespace AIUsageManager
         static Dictionary<string,object> Map(params object[] pairs)
         { var result=new Dictionary<string,object>();for(int i=0;i<pairs.Length;i+=2)result.Add((string)pairs[i],pairs[i+1]);return result; }
         static string Date(DateTimeOffset? value) { return value.HasValue?value.Value.ToUniversalTime().ToString("o"):null; }
-        public static string Disconnected() { return "{\"schemaVersion\":1,\"connected\":false,\"services\":[]}"; }
+        public static string Disconnected() { return "{\"schemaVersion\":2,\"connected\":false,\"services\":[]}"; }
         public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing)
         {
             var services=new List<object>();
@@ -26,13 +26,13 @@ namespace AIUsageManager
                 foreach(var window in value.Windows) {
                     var alert=UsageAlerts.ForWindow(value,window,now);
                     var pace=UsageAlerts.PaceForWindow(value,window,now);
-                    windows.Add(Map("label",window.Label,"percent",window.Percent,"resetsAt",Date(window.ResetsAt),"pace",pace==null?null:Map("summary",pace.Summary,"detail",pace.Detail),"alert",alert==null?null:Map(
+                    windows.Add(Map("label",window.Label,"shortLabel",window.ShortLabel,"span",window.Span==UsageSpan.FiveHour?"5h":"week","percent",window.Percent,"resetsAt",Date(window.ResetsAt),"pace",pace==null?null:Map("summary",pace.Summary,"detail",pace.Detail),"alert",alert==null?null:Map(
                         "title",alert.Title,"detail",alert.Detail,"threshold",alert.Threshold,"rapidIncrease",alert.RapidIncrease,"forecastAt",Date(alert.ForecastAt))));
                 }
                 services.Add(Map("name",name,"plan",value.Plan,"source",value.Source,"status",value.Status,"needsLogin",value.NeedsLogin,
                     "recordedAt",Date(value.RecordedAt),"windows",windows));
             }
-            return new JavaScriptSerializer().Serialize(Map("schemaVersion",1,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services));
+            return new JavaScriptSerializer().Serialize(Map("schemaVersion",2,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services));
         }
     }
     public sealed class SnapshotServer : IDisposable

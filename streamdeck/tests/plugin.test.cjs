@@ -4,9 +4,9 @@ const { createPlugin } = require('../src/plugin');
 
 const ID = 'io.github.genkis3zu.aiusagemanager';
 const RECORDED = new Date(1000).toISOString();
-const win = (label, percent) => ({ label, percent, resetsAt: '2030-01-01T00:00:00.000Z', pace: null, alert: null });
+const win = (label, percent) => ({ label, shortLabel: label === '5時間' ? '5h' : label, span: label === '5時間' ? '5h' : 'week', percent, resetsAt: '2030-01-01T00:00:00.000Z', pace: null, alert: null });
 const service = (name, windows) => ({ name, plan: 'Pro', source: 'オンライン', status: '', needsLogin: false, recordedAt: RECORDED, windows });
-const SNAP = JSON.stringify({ schemaVersion: 1, connected: true, generatedAt: RECORDED, refreshing: false, services: [
+const SNAP = JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: RECORDED, refreshing: false, services: [
   service('Claude', [win('5時間', 10), win('週', 20)]), service('Codex', [win('週', 30)]), service('Grok', [win('週', 40)]),
 ] });
 const appear = (context, action = ID + '.codex', settings = {}) => ({ event: 'willAppear', action, context, payload: { settings } });

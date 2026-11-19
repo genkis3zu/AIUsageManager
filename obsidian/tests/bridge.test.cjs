@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { BridgeClient } = require('../src/bridge');
 test('snapshot requests have fixed arguments, timeout, output bound and no shell',async()=> {
-  let args;const b=new BridgeClient((...values)=> {args=values;queueMicrotask(()=>values[3](null,'{"schemaVersion":1,"connected":false,"services":[]}',''));return {kill(){}};});
+  let args;const b=new BridgeClient((...values)=> {args=values;queueMicrotask(()=>values[3](null,'{"schemaVersion":2,"connected":false,"services":[]}',''));return {kill(){}};});
   assert.equal((await b.read('C:\\Apps\\AIUsageManager.exe')).connected,false);
   assert.deepEqual(args[1],['--obsidian-data']);assert.equal(args[2].shell,false);assert.equal(args[2].windowsHide,true);assert.equal(args[2].maxBuffer,65536);assert.equal(args[2].timeout,4000);
 });

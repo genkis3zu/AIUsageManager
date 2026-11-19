@@ -5,19 +5,25 @@ const text = (v, max = 180) => typeof v === 'string' ? v.slice(0, max) : '';
 const date = v => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? v : null;
 const validPath = v => typeof v === 'string' && /^[a-z]:[\\/]/i.test(v) && path.win32.basename(v.replace(/\//g, '\\')).toLowerCase() === 'aiusagemanager.exe' && !/[\r\n\0"]/u.test(v);
 function normalizeSettings(v = {}) { return { mode: v.mode === 'compact' ? 'compact' : 'standard', appPath: validPath(v.appPath) ? v.appPath : '' }; }
-function emptyServices() { return names.map(name => ({name, plan:'', source:'', status:'', recordedAt:null, needsLogin:false, windows:(name==='Claude'?['5時間','週']:['週']).map(label => ({label, percent:null, resetsAt:null, alert:null}))})); }
+// Windows vary by plan (e.g. Claude Ultra has no 5-hour window but a weekly Fable one), so each service carries 0–4.
+const WINDOW_LABEL = /^(5時間|週|週（.{1,24}）)$/u;
+function emptyServices() { return names.map(name => ({name, plan:'', source:'', status:'', recordedAt:null, needsLogin:false, windows:[]})); }
 function parseSnapshot(json) {
   if(typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > 65536) throw new Error('Invalid snapshot');
   const value=JSON.parse(json);
-  if(!value || value.schemaVersion!==1 || typeof value.connected!=='boolean' || !Array.isArray(value.services)) throw new Error('Invalid snapshot');
+  if(!value || value.schemaVersion!==2 || typeof value.connected!=='boolean' || !Array.isArray(value.services)) throw new Error('Invalid snapshot');
   if(!value.connected) return {connected:false, refreshing:false, services:emptyServices()};
   if(value.services.length!==3 || names.some(name=>value.services.filter(s=>s?.name===name).length!==1)) throw new Error('Invalid services');
   return {connected:true, refreshing:value.refreshing===true, services:names.map(name=> {
-    const s=value.services.find(s=>s.name===name), labels=name==='Claude'?['5時間','週']:['週'];
-    if(!Array.isArray(s.windows) || s.windows.length!==labels.length || labels.some(label=>s.windows.filter(w=>w?.label===label).length!==1)) throw new Error('Invalid windows');
-    return {name,plan:text(s.plan),source:text(s.source),status:text(s.status),needsLogin:s.needsLogin===true,recordedAt:date(s.recordedAt), windows:labels.map(label=> {
-      const w=s.windows.find(w=>w.label===label), a=w.alert, p=w.pace;
-      return {label,percent:typeof w.percent==='number' && Number.isFinite(w.percent) && w.percent>=0 && w.percent<=100000 ? w.percent : null,resetsAt:date(w.resetsAt),pace:p && typeof p==='object'?{summary:text(p.summary),detail:text(p.detail,700)}:null,alert:a && typeof a==='object' ? {title:text(a.title),detail:text(a.detail,700),threshold:[90,95,100].includes(a.threshold)?a.threshold:0,rapidIncrease:a.rapidIncrease===true,forecastAt:date(a.forecastAt)} : null};
+    const s=value.services.find(s=>s.name===name);
+    if(!Array.isArray(s.windows) || s.windows.length>4) throw new Error('Invalid windows');
+    const seen=new Set();
+    return {name,plan:text(s.plan),source:text(s.source),status:text(s.status),needsLogin:s.needsLogin===true,recordedAt:date(s.recordedAt), windows:s.windows.map(w=> {
+      if(!w || typeof w.label!=='string' || !WINDOW_LABEL.test(w.label) || seen.has(w.label)) throw new Error('Invalid windows');
+      if(typeof w.shortLabel!=='string' || w.shortLabel.length<1 || Array.from(w.shortLabel).length>24 || !['5h','week'].includes(w.span)) throw new Error('Invalid windows');
+      seen.add(w.label);
+      const a=w.alert, p=w.pace;
+      return {label:w.label,shortLabel:w.shortLabel,span:w.span,percent:typeof w.percent==='number' && Number.isFinite(w.percent) && w.percent>=0 && w.percent<=100000 ? w.percent : null,resetsAt:date(w.resetsAt),pace:p && typeof p==='object'?{summary:text(p.summary),detail:text(p.detail,700)}:null,alert:a && typeof a==='object' ? {title:text(a.title),detail:text(a.detail,700),threshold:[90,95,100].includes(a.threshold)?a.threshold:0,rapidIncrease:a.rapidIncrease===true,forecastAt:date(a.forecastAt)} : null};
     })};
   })};
 }

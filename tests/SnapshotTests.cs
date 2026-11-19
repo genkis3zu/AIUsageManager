@@ -40,9 +40,19 @@ internal static partial class Tests
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[0].Percent=0;values[0].Windows[1].Percent=100;values[1].Windows[0].Percent=null;
             string json=UsageSnapshot.Create(values,T,false);
             var data=new JavaScriptSerializer().Deserialize<Dictionary<string,object>>(json);
-            Assert((int)data["schemaVersion"]==1 && (bool)data["connected"]);
+            Assert((int)data["schemaVersion"]==2 && (bool)data["connected"]);
             Assert(json.Contains("\"percent\":0") && json.Contains("\"percent\":null") && json.Contains("2026-10-10T09:00:00") && json.Contains("上限に達しています"));
             Assert(!json.Contains("data:image") && !json.Contains("auth") && !json.Contains("token"));
+        });
+        Check("Snapshot v2 carries span and short labels for every returned window",()=> {
+            var values=WidgetCards.Sample(T);
+            values[0].Windows.Clear();values[0].Windows.Add(UsageWindow.Week(40,T.AddDays(3)));values[0].Windows.Add(UsageWindow.Scoped("Fable",70,T.AddDays(3)));
+            values[1].Windows.Insert(0,UsageWindow.FiveHour(12,T.AddHours(3)));
+            string json=UsageSnapshot.Create(values,T,false);
+            Assert(json.Contains("\"schemaVersion\":2") && json.Contains("\"label\":\"週（Fable）\"") && json.Contains("\"shortLabel\":\"Fable\""));
+            Assert(json.Contains("\"span\":\"week\"") && json.Contains("\"span\":\"5h\"") && json.Contains("\"shortLabel\":\"5h\""));
+            var claude=((object[])((Dictionary<string,object>)new JavaScriptSerializer().DeserializeObject(json))["services"])[0] as Dictionary<string,object>;
+            Assert(((object[])claude["windows"]).Length==2 && UsageSnapshot.Disconnected().Contains("\"schemaVersion\":2"));
         });
         Check("Snapshot drops expired warning messages while retaining original usage",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[1].Percent=100;

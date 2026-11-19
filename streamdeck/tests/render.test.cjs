@@ -5,10 +5,11 @@ const { ACTIONS, PALETTES, STYLES, defaultSettings, normalizeKeySettings, nextSt
 const { keyView, renderKey } = require('../src/render');
 
 const RECORDED = '2026-11-19T00:00:00.000Z', NOW = Date.parse(RECORDED) + 60000, LATER_RESET = '2026-11-21T00:00:00.000Z';
-const win = (label, percent, resetsAt = LATER_RESET) => ({ label, percent, resetsAt, pace: null, alert: null });
+const SHAPE = { '5時間': ['5h', '5h'], '週': ['週', 'week'] };
+const win = (label, percent, resetsAt = LATER_RESET) => ({ label, shortLabel: (SHAPE[label] || [label.slice(2, -1), 'week'])[0], span: (SHAPE[label] || [0, 'week'])[1], percent, resetsAt, pace: null, alert: null });
 function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt] } = {}) {
   const service = (name, windows) => ({ name, plan: 'Pro', source, status, needsLogin: needsLogin[name] === true, recordedAt, windows });
-  return JSON.stringify({ schemaVersion: 1, connected: true, generatedAt: recordedAt, refreshing, services: [
+  return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, services: [
     service('Claude', [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
     service('Codex', [win('週', codex, resetsAt)]),
     service('Grok', [win('週', grok, resetsAt)]),
@@ -107,7 +108,7 @@ test('state: invalid JSON counts as a failure', () => {
   assert.equal(once.status, 'connected'); assert.equal(once.failures, 1);
 });
 test('state: connected:false and absent disconnect at once', () => {
-  const off = nextConnection(connected(), { kind: 'ok', json: '{"schemaVersion":1,"connected":false,"services":[]}' });
+  const off = nextConnection(connected(), { kind: 'ok', json: '{"schemaVersion":2,"connected":false,"services":[]}' });
   assert.deepEqual(off, { status: 'disconnected', snapshot: null, failures: 0 });
   assert.deepEqual(nextConnection(connected(), { kind: 'absent' }), { status: 'disconnected', snapshot: null, failures: 0 });
 });

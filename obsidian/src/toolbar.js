@@ -4,7 +4,7 @@ function element(doc,tag,cls,text) {const el=doc.createElement(tag);el.className
 class UsageToolbar {
   constructor(content,actions) {
     const doc=content.ownerDocument;
-    this.content=content;this.parent=content.parentElement;this.actions=actions;
+    this.doc=doc;this.content=content;this.parent=content.parentElement;this.actions=actions;
     this.root=element(doc,'section','aiut-toolbar');this.root.setAttribute('aria-label','AI 使用量');
     this.list=element(doc,'div','aiut-list');this.controls=element(doc,'div','aiut-controls');
     this.root.append(this.list,this.controls);this.rows=[];
@@ -12,19 +12,21 @@ class UsageToolbar {
       const row=element(doc,'div','aiut-row');row.dataset.service=name.toLowerCase();
       const button=element(doc,'button','aiut-service',name);button.type='button';button.addEventListener('click',()=>actions.open());
       const indicator=element(doc,'span','aiut-indicator');indicator.setAttribute('aria-hidden','true');button.prepend(indicator);
-      const windows=element(doc,'div','aiut-windows');const slots=[];
-      for(const label of name==='Claude'?['5時間','週']:['週']) {
-        const slot=element(doc,'span','aiut-window'),caption=element(doc,'span','aiut-label',label==='5時間'?'5h':label);
-        const value=element(doc,'span','aiut-value','未取得'),track=element(doc,'span','aiut-track'),fill=element(doc,'span','aiut-fill'),reset=element(doc,'span','aiut-reset');
-        track.setAttribute('aria-hidden','true');track.append(fill);slot.append(caption,value,track,reset);windows.append(slot);slots.push({slot,value,fill,reset});
-      }
+      // Window slots are built in update(): the number of windows depends on the plan.
+      const windows=element(doc,'div','aiut-windows');
       const state=element(doc,'span','aiut-state'),time=element(doc,'span','aiut-time');row.append(button,windows,state,time);this.list.append(row);
-      this.rows.push({row,button,indicator,slots,state,time});
+      this.rows.push({row,button,indicator,windows,slots:[],labels:null,state,time});
     }
     this.toggle=this.control(doc,'縮小表示（1行）','⇡',()=>actions.toggle());
     this.refresh=this.control(doc,'使用量を更新','↻',()=>actions.refresh());
     this.open=this.control(doc,'アプリで詳細を開く','↗',()=>actions.open());
     this.parent.classList.add('aiut-host');this.parent.insertBefore(this.root,content);
+  }
+  slot(w) {
+    const doc=this.doc,slot=element(doc,'span','aiut-window'),caption=element(doc,'span','aiut-label',w.shortLabel);
+    const value=element(doc,'span','aiut-value','未取得'),track=element(doc,'span','aiut-track'),fill=element(doc,'span','aiut-fill'),reset=element(doc,'span','aiut-reset');
+    track.setAttribute('aria-hidden','true');track.append(fill);slot.append(caption,value,track,reset);
+    return {slot,caption,value,fill,reset};
   }
   control(doc,label,glyph,run) {
     const button=element(doc,'button','aiut-control',glyph);button.type='button';button.title=label;button.setAttribute('aria-label',label);button.addEventListener('click',run);this.controls.append(button);return button;
@@ -39,6 +41,8 @@ class UsageToolbar {
       ui.button.setAttribute('aria-label',`${v.tooltip}。アプリで詳細を開く`);
       ui.indicator.textContent=['warning','critical'].includes(v.severity)?'⚠':'●';
       ui.state.textContent=message || v.state;ui.state.title=message || v.tooltip;ui.time.textContent=`取得 ${v.stamp}`;
+      const labels=v.windows.map(w=>w.label).join('|');
+      if(labels!==ui.labels) {ui.slots=v.windows.map(w=>this.slot(w));ui.windows.replaceChildren(...ui.slots.map(s=>s.slot));ui.labels=labels;}
       v.windows.forEach((w,i)=> {
         const slot=ui.slots[i];slot.value.textContent=w.display;slot.fill.style.width=`${Math.min(100,w.percent||0)}%`;
         slot.slot.classList.toggle('is-high',w.active && w.percent>=80);slot.slot.classList.toggle('is-stale',!w.active);

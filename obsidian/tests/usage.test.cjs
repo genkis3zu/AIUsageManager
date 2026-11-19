@@ -2,7 +2,9 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { parseSnapshot, presentService, percent, normalizeSettings } = require('../src/usage');
 const now = Date.parse('2026-10-11T09:00:00Z');
-function payload() { return {schemaVersion:1, connected:true, services:['Claude','Codex','Grok'].map(name=>({name,plan:'Test',source:'オンライン',status:'',recordedAt:new Date(now).toISOString(),windows:(name==='Claude'?['5時間','週']:['週']).map(label=>({label,percent:0,resetsAt:new Date(now+3600000).toISOString(),alert:null}))}))}; }
+const W={'5時間':{shortLabel:'5h',span:'5h'},'週':{shortLabel:'週',span:'week'},'週（Fable）':{shortLabel:'Fable',span:'week'}};
+const win=(label,percent=0)=>({label,...W[label],percent,resetsAt:new Date(now+3600000).toISOString(),alert:null});
+function payload() { return {schemaVersion:2, connected:true, services:['Claude','Codex','Grok'].map(name=>({name,plan:'Test',source:'オンライン',status:'',recordedAt:new Date(now).toISOString(),windows:(name==='Claude'?['5時間','週']:['週']).map(label=>win(label))}))}; }
 test('missing is distinct from acquired zero and percentages are bounded',()=> {
   const p=payload();p.services[1].windows[0].percent=null;p.services[2].windows[0].percent=-1;
   const s=parseSnapshot(JSON.stringify(p));
@@ -12,8 +14,27 @@ test('missing is distinct from acquired zero and percentages are bounded',()=> {
 });
 test('unsupported schemas, duplicate services, oversized and malformed responses reject',()=> {
   assert.throws(()=>parseSnapshot('{'));assert.throws(()=>parseSnapshot('x'.repeat(65537)));
-  const p=payload();p.schemaVersion=2;assert.throws(()=>parseSnapshot(JSON.stringify(p)));
-  p.schemaVersion=1;p.services[1].name='Claude';assert.throws(()=>parseSnapshot(JSON.stringify(p)));
+  const p=payload();p.schemaVersion=1;assert.throws(()=>parseSnapshot(JSON.stringify(p)));
+  p.schemaVersion=2;p.services[1].name='Claude';assert.throws(()=>parseSnapshot(JSON.stringify(p)));
+});
+test('zero to four windows are accepted with their short labels and spans',()=> {
+  for(const labels of [[],['週'],['週','週（Fable）'],['5時間','週','週（Fable）','週（Other）']]) {
+    const p=payload();p.services[0].windows=labels.map(label=>label==='週（Other）'?{...win('週（Fable）'),label,shortLabel:'Other'}:win(label));
+    const s=parseSnapshot(JSON.stringify(p)).services[0];
+    assert.deepEqual(s.windows.map(w=>[w.label,w.shortLabel,w.span]),p.services[0].windows.map(w=>[w.label,w.shortLabel,w.span]));
+  }
+});
+test('five windows, duplicate labels, unknown spans and unknown labels reject',()=> {
+  const five=payload();five.services[0].windows=['5時間','週','週（Fable）','週（A）','週（B）'].map(label=>({...win('週（Fable）'),label}));assert.throws(()=>parseSnapshot(JSON.stringify(five)));
+  const dup=payload();dup.services[0].windows=[win('週'),win('週')];assert.throws(()=>parseSnapshot(JSON.stringify(dup)));
+  const span=payload();span.services[0].windows=[{...win('週'),span:'day'}];assert.throws(()=>parseSnapshot(JSON.stringify(span)));
+  const label=payload();label.services[0].windows=[{...win('週'),label:'月'}];assert.throws(()=>parseSnapshot(JSON.stringify(label)));
+  const short=payload();short.services[0].windows=[{...win('週'),shortLabel:''}];assert.throws(()=>parseSnapshot(JSON.stringify(short)));
+});
+test('presentService works with three Claude windows',()=> {
+  const p=payload();p.services[0].windows=[win('5時間',10),win('週',20),win('週（Fable）',96)];
+  const v=presentService(parseSnapshot(JSON.stringify(p)).services[0],true,now);
+  assert.deepEqual(v.windows.map(w=>w.label),['5時間','週','週（Fable）']);assert.equal(v.severity,'critical');assert.match(v.tooltip,/週（Fable） 96%/);
 });
 test('current high usage carries readable warnings and original observation time',()=> {
   const p=payload();p.services[1].windows[0].percent=96;
