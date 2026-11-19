@@ -18,7 +18,9 @@ namespace AIUsageManager
         { var result=new Dictionary<string,object>();for(int i=0;i<pairs.Length;i+=2)result.Add((string)pairs[i],pairs[i+1]);return result; }
         static string Date(DateTimeOffset? value) { return value.HasValue?value.Value.ToUniversalTime().ToString("o"):null; }
         public static string Disconnected() { return "{\"schemaVersion\":2,\"connected\":false,\"services\":[]}"; }
-        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing)
+        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing) { return Create(values,now,refreshing,null); }
+        // `status` (the AIの状況 line) is optional; readers that do not know it skip it.
+        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing,StatusSummary status)
         {
             var services=new List<object>();
             foreach(string name in new[]{"Claude","Codex","Grok"}) {
@@ -32,7 +34,9 @@ namespace AIUsageManager
                 services.Add(Map("name",name,"plan",value.Plan,"source",value.Source,"status",value.Status,"needsLogin",value.NeedsLogin,
                     "recordedAt",Date(value.RecordedAt),"windows",windows));
             }
-            return new JavaScriptSerializer().Serialize(Map("schemaVersion",2,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services));
+            var root=Map("schemaVersion",2,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services);
+            if(status!=null)root.Add("status",Map("tone",status.Tone,"title",status.Title,"detail",status.Detail,"page",status.Page,"line",status.Line));
+            return new JavaScriptSerializer().Serialize(root);
         }
     }
     public sealed class SnapshotServer : IDisposable

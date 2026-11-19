@@ -167,6 +167,9 @@ namespace AIUsageManager
         public void SetRefresh(bool isBusy,DateTimeOffset? next)
         {busy=isBusy;nextRefresh=next;refresh.Enabled=!busy;refresh.Text=busy?"更新中":"更新";Invalidate();}
         public void SetLoginBusy(bool value) { foreach(var row in rows)row.SetLoginBusy(value); }
+        StatusSummary status;
+        // The line under the heading shows AIの状況 (outage, partial outage, recent reset or normal).
+        public void SetStatus(StatusSummary value) { status=value;AccessibleDescription=value==null?null:value.Line;Invalidate(); }
         public void TickDisplay() { if(Visible){SetUsage(rows.Select(row=>row.Usage).ToArray());} }
         void LayoutRows() { LayoutRows(Screen.FromControl(this).WorkingArea); }
         void LayoutRows(Rectangle area)
@@ -234,7 +237,8 @@ namespace AIUsageManager
         {
             base.OnPaint(e);var g=e.Graphics;g.ScaleTransform(scale,scale);g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             Artwork.Text(g,"使用量",18,true,palette.Ink,new RectangleF(20,16,150,28),false);
-            Artwork.Text(g,"AI Usage Manager",10,false,palette.Muted,new RectangleF(20,44,200,18),false);
+            Color statusInk=status==null?palette.Muted:status.Tone=="critical"?palette.Red:status.Tone=="warning"?palette.Warning:status.Tone=="reset"?palette.Blue:palette.Muted;
+            Artwork.Text(g,status==null?"AI Usage Manager":status.Line,10,status!=null&&(status.Tone=="critical"||status.Tone=="warning"),statusInk,new RectangleF(20,44,276,18),false);
             string footer=busy?"使用量を取得しています…":"5分ごとに自動更新";
             if(!busy&&nextRefresh.HasValue)footer+="  ·  次回 "+nextRefresh.Value.ToLocalTime().ToString("HH:mm");
             Artwork.Text(g,footer,10,false,palette.Muted,new RectangleF(20,ClientSize.Height/scale-35,380,26),false);

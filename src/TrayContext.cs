@@ -34,6 +34,10 @@ namespace AIUsageManager
         readonly SnapshotServer snapshots;
         readonly RegisteredWaitHandle refreshWait;
         ServiceUsage[] latest=WidgetCards.Unavailable();
+        // AIの状況: public status pages read with each refresh, plus weekly reset notices.
+        readonly Func<CancellationToken,Task<ProviderStatus[]>> statusPages;
+        readonly ResetTracker resets=new ResetTracker();
+        StatusSummary latestStatus;
         // Order matches the login signals Program passes in: Claude, Codex, Grok.
         static readonly string[] LoginServices = {"Claude","Codex","Grok"};
         readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[3];
@@ -49,8 +53,9 @@ namespace AIUsageManager
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
             : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
-        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal)
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null)
         {
+            statusPages=statusSource??(source==null?(Func<CancellationToken,Task<ProviderStatus[]>>)(token=>StatusPages.FetchAsync(http,token)):null);
             snapshots=snapshotServer;
             alerts=new UsageAlerts(source==null?UsageForecaster.Default():new UsageForecaster());
             loginLauncher=launcher;
@@ -191,7 +196,10 @@ namespace AIUsageManager
             PublishSnapshot();
             try
             {
+                var statusTask=statusPages==null?null:statusPages(cancellation.Token);
                 var result=await service.FetchAllAsync(cancellation.Token);
+                ProviderStatus[] providers=null;
+                if(statusTask!=null)try {providers=await statusTask;}catch(Exception){providers=null;}
                 if(exiting)return;
                 var mode=notificationMode;
                 var notices=await Task.Run(()=> {
@@ -200,6 +208,7 @@ namespace AIUsageManager
                 });
                 if(exiting)return;
                 latest=result;
+                if(statusPages!=null) {latestStatus=StatusSummary.Create(providers,resets.Observe(result,DateTimeOffset.Now),DateTimeOffset.Now);popup.SetStatus(latestStatus);}
                 popup.SetUsage(result);
                 tray.Text=UsageText.Summary(result);
                 // OS notification delivery must never turn a successful fetch into an error.
@@ -217,7 +226,7 @@ namespace AIUsageManager
                 if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;learningMenu.Enabled=true;refreshTimer.Start();}
             }
         }
-        void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing)); }
+        void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus)); }
         protected override void ExitThreadCore()
         {
             if(exiting)return;exiting=true;

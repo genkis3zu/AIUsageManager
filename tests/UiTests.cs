@@ -203,15 +203,19 @@ internal static class UiTests
                 string loginFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(loginFixture);
                 var loginSource=new FakeSource();var requested=new FakeLogin();
                 claudeEvent.Set();
-                context=new TrayContext(false,showEvent,loginSource,new ThemeSettings(Path.Combine(loginFixture,"settings.ini")),requested,new[]{claudeEvent,codexEvent,grokEvent},text=>{},null,null);
+                var statusSnapshots=new SnapshotServer("AIUsageManager.UiTests.Status."+Guid.NewGuid().ToString("N"));
+                Func<CancellationToken,Task<ProviderStatus[]>> statusPages=token=>Task.FromResult(new[]{new ProviderStatus{Company="Claude",Level=StatusLevel.Major,Detail="Claude Code"},new ProviderStatus{Company="OpenAI",Level=StatusLevel.Operational}});
+                context=new TrayContext(false,showEvent,loginSource,new ThemeSettings(Path.Combine(loginFixture,"settings.ini")),requested,new[]{claudeEvent,codexEvent,grokEvent},text=>{},statusSnapshots,null,statusPages);
                 Assert(Pump(()=>loginSource.Calls==1),"Tray started for a login still runs its first refresh");
                 loginSource.Complete();
                 Assert(Pump(()=>requested.Calls==1)&&requested.Service=="Claude","A login requested before the tray app starts runs for Claude once it is ready");
+                var statusPopup=Field<PopupForm>(context,"popup");
+                Assert(Pump(()=>statusPopup.AccessibleDescription=="Claude 障害（Claude Code）")&&Field<string>(statusSnapshots,"latest").Contains("\"title\":\"Claude 障害\""),"Refresh shows the outage line in the tray and shares it with Stream Deck");
                 requested.Pending.SetResult(null);Assert(Pump(()=>loginSource.Calls==2),"Finished login refreshes usage");
                 loginSource.Complete();Assert(Pump(()=>!Field<bool>(context,"loggingIn")),"Login state is released after the refresh");
                 codexEvent.Set();
                 Assert(Pump(()=>requested.Calls==2)&&requested.Service=="Codex","A login requested while the tray app runs goes to the requested service");
-                context.ExitThread();context=null;
+                context.ExitThread();context=null;statusSnapshots.Dispose();
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;
         }
