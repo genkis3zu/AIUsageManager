@@ -18,6 +18,17 @@ internal static partial class Tests
         }
         return profile;
     }
+    static string CodexMeta(string source)
+    { return J("{'timestamp':'2026-11-20T01:00:00Z','type':'session_meta','payload':{'id':'t1','cwd':'C:\\\\src\\\\web-app','originator':'Codex Desktop','source':" + source + "}}"); }
+    static string CodexEvent(string minute, string kind)
+    { return J("{'timestamp':'2026-11-20T01:" + minute + ":00Z','type':'event_msg','payload':{'type':'" + kind + "'}}"); }
+    static string CodexAsk(string minute, string id)
+    { return J("{'timestamp':'2026-11-20T01:" + minute + ":00Z','type':'response_item','payload':{'type':'function_call','name':'request_user_input_async','call_id':'" + id + "','arguments':'{}'}}"); }
+    static string CodexAnswer(string minute, string id)
+    { return J("{'timestamp':'2026-11-20T01:" + minute + ":00Z','type':'response_item','payload':{'type':'function_call_output','call_id':'" + id + "','output':'x'}}"); }
+    // Lines as written (oldest first) are handed to Classify newest first.
+    static CodexThread Classify(params string[] lines)
+    { return CodexSessions.Classify(lines[0], lines.Reverse()); }
     static void RunWaitingTests()
     {
         Check("Claude session files give status, reason and start time", () => {
@@ -60,5 +71,42 @@ internal static partial class Tests
         Check("Claude sessions open the desktop app unless they run in VS Code", () => {
             Assert(WaitingNames.ClaudeApp("claude-desktop") == "claude" && WaitingNames.ClaudeApp("claude-vscode") == "vscode" && WaitingNames.ClaudeApp(null) == "claude");
         });
-    }
+         Check("A pending Codex question is a question; an answered one is not", () => {
+            var asked = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"), CodexAsk("02", "c1"));
+            Assert(asked.State == CodexState.Question && asked.Since == DateTimeOffset.Parse("2026-11-20T01:02:00Z"));
+            var done = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"), CodexAsk("02", "c1"), CodexAnswer("03", "c1"), CodexEvent("04", "task_complete"));
+            Assert(done.State == CodexState.Finished && done.Since == DateTimeOffset.Parse("2026-11-20T01:04:00Z"));
+            Assert(Classify(CodexMeta("'vscode'"), CodexAsk("02", "c1"), CodexAnswer("03", "c1")).State == CodexState.Unknown);
+        });
+        Check("Codex working, finished and unknown threads", () => {
+            Assert(Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_complete"), CodexEvent("05", "task_started")).State == CodexState.Working);
+            Assert(Classify(CodexMeta("'vscode'")).State == CodexState.Unknown);
+        });
+        Check("A cut-off last Codex line does not break classification", () => {
+            var t = Classify(CodexMeta("'vscode'"), CodexEvent("04", "task_complete"), "{\"timestamp\":\"2026-");
+            Assert(t.State == CodexState.Finished);
+        });
+        Check("Codex meta gives folder and app", () => {
+            var vscode = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"));
+            Assert(vscode.Id == "t1" && vscode.Cwd == @"C:\src\web-app" && vscode.Originator == "Codex Desktop" && CodexSessions.App(vscode) == "vscode");
+            var desktop = Classify(CodexMeta("{'kind':'app'}"), CodexEvent("01", "task_started"));
+            Assert(desktop.Source == null && CodexSessions.App(desktop) == "codex");
+        });
+        Check("Codex threads are read only while a Codex app runs and only from recent files", () => {
+            string dir = Path.Combine(".codex", "sessions", "2026", "11", "20");
+            string profile = Profile(Path.Combine(dir, "new.jsonl"), CodexMeta("'vscode'") + "\n" + CodexEvent("01", "task_started") + "\n",
+                Path.Combine(dir, "old.jsonl"), CodexMeta("'vscode'") + "\n" + CodexEvent("01", "task_started") + "\n");
+            try
+            {
+                File.SetLastWriteTimeUtc(Path.Combine(profile, dir, "old.jsonl"), DateTime.UtcNow.AddHours(-13));
+                bool ok;
+                Assert(CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => false, out ok).Length == 0 && ok);
+                var threads = CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => true, out ok);
+                Assert(ok && threads.Length == 1 && threads[0].State == CodexState.Working);
+                CodexSessions.Read(Path.Combine(profile, "missing"), DateTimeOffset.UtcNow, () => true, out ok);
+                Assert(!ok);
+            }
+            finally { Directory.Delete(profile, true); }
+        });
+   }
 }

@@ -67,6 +67,108 @@ namespace AIUsageManager
             catch (InvalidOperationException) { return false; }
         }
     }
+    public enum CodexState { Unknown, Working, Question, Finished }
+    // One Codex thread (desktop app or VS Code), from its session record in ~/.codex/sessions.
+    // Only event types, call ids, times and the working folder are used, never conversation content.
+    public sealed class CodexThread
+    {
+        public string Id, Cwd, Originator, Source;
+        public CodexState State;
+        public DateTimeOffset? Since;
+    }
+    public static class CodexSessions
+    {
+        const int MaxLines = 2000, MaxFirstLine = 1048576;
+        static readonly object gate = new object();
+        static Dictionary<string, KeyValuePair<DateTime, CodexThread>> cache = new Dictionary<string, KeyValuePair<DateTime, CodexThread>>();
+        // The last thing that happened decides: a question not yet answered, a finished task, or a started task.
+        public static CodexThread Classify(string firstLine, IEnumerable<string> linesNewestFirst)
+        {
+            var thread = new CodexThread { State = CodexState.Unknown };
+            var meta = Json.Parse(firstLine ?? "");
+            if (meta != null && Json.Str(meta, "type") == "session_meta")
+            {
+                var payload = Json.Obj(meta, "payload");
+                thread.Id = Json.Str(payload, "id"); thread.Cwd = Json.Str(payload, "cwd");
+                thread.Originator = Json.Str(payload, "originator"); thread.Source = Json.Str(payload, "source");
+            }
+            var answered = new HashSet<string>(); int seen = 0;
+            foreach (string line in linesNewestFirst ?? new string[0])
+            {
+                if (++seen > MaxLines) break;
+                var row = Json.Parse(line);
+                var payload = Json.Obj(row, "payload");
+                if (payload == null) continue;
+                string type = Json.Str(row, "type"), kind = Json.Str(payload, "type");
+                var at = Json.Date(Json.Get(row, "timestamp"));
+                if (type == "response_item" && kind == "function_call_output") { string id = Json.Str(payload, "call_id"); if (id != null) answered.Add(id); continue; }
+                if (type == "response_item" && kind == "function_call" && Json.Str(payload, "name") == "request_user_input_async" && !answered.Contains(Json.Str(payload, "call_id") ?? ""))
+                { thread.State = CodexState.Question; thread.Since = at; return thread; }
+                if (type == "event_msg" && kind == "task_complete") { thread.State = CodexState.Finished; thread.Since = at; return thread; }
+                if (type == "event_msg" && kind == "task_started") { thread.State = CodexState.Working; thread.Since = at; return thread; }
+            }
+            return thread;
+        }
+        // Threads written in the last 12 hours, while a Codex app (ChatGPT/Codex or VS Code) runs.
+        public static CodexThread[] Read(string profile, DateTimeOffset now, Func<bool> appRunning, out bool readable)
+        {
+            readable = false;
+            try
+            {
+                var directory = new DirectoryInfo(Path.Combine(profile, ".codex", "sessions"));
+                if (!directory.Exists) return new CodexThread[0];
+                readable = true;
+                if (!(appRunning ?? AppRunning)()) return new CodexThread[0];
+                var oldest = now.UtcDateTime.AddHours(-12);
+                var result = new List<CodexThread>();
+                var next = new Dictionary<string, KeyValuePair<DateTime, CodexThread>>();
+                foreach (var file in directory.EnumerateFiles("*.jsonl", SearchOption.AllDirectories))
+                {
+                    var written = file.LastWriteTimeUtc;
+                    if (written < oldest) continue;
+                    KeyValuePair<DateTime, CodexThread> hit; CodexThread thread;
+                    lock (gate) if (!cache.TryGetValue(file.FullName, out hit) || hit.Key != written) hit = new KeyValuePair<DateTime, CodexThread>(written, null);
+                    thread = hit.Value;
+                    if (thread == null)
+                    {
+                        try { thread = Classify(FirstLine(file.FullName), ReadOnlyFiles.ReverseLines(file.FullName)); }
+                        catch (IOException) { continue; }
+                        catch (UnauthorizedAccessException) { continue; }
+                    }
+                    next[file.FullName] = new KeyValuePair<DateTime, CodexThread>(written, thread);
+                    result.Add(thread);
+                }
+                lock (gate) cache = next;
+                return result.ToArray();
+            }
+            catch (IOException) { readable = false; }
+            catch (UnauthorizedAccessException) { readable = false; }
+            catch (SecurityException) { readable = false; }
+            return new CodexThread[0];
+        }
+        static string FirstLine(string path)
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+            {
+                var line = new StringBuilder(); int c;
+                while ((c = reader.Read()) >= 0 && c != '\n') { if (line.Length >= MaxFirstLine) return ""; line.Append((char)c); }
+                return line.ToString().TrimEnd('\r');
+            }
+        }
+        public static bool AppRunning()
+        {
+            foreach (string name in new[] { "ChatGPT", "Codex", "Code" })
+            {
+                var processes = Process.GetProcessesByName(name);
+                bool any = processes.Length > 0;
+                foreach (var process in processes) process.Dispose();
+                if (any) return true;
+            }
+            return false;
+        }
+        public static string App(CodexThread thread) { return thread != null && thread.Source == "vscode" ? "vscode" : "codex"; }
+    }
     public static class WaitingNames
     {
         // The session name first; otherwise the project folder (a Claude worktree …\<project>\.claude\worktrees\<x> shows <project>).
