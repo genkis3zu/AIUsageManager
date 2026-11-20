@@ -4,7 +4,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
 
 ## 表示と操作
 
-キーは4種類です。Stream Deckアプリの右側の一覧にある「AI Usage Manager」から、ボタンへドラッグして置きます。
+キーは5種類です。Stream Deckアプリの右側の一覧にある「AI Usage Manager」から、ボタンへドラッグして置きます。
 
 | キー | 表示するもの |
 |---|---|
@@ -12,6 +12,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
 | Codex 使用量 | 週（Plusなどは5時間も） |
 | Grok 使用量 | 週 |
 | AIの状況 | AnthropicとOpenAIの障害情報と、週の使用枠のリセット（[下記](#aiの状況キー)） |
+| 対応待ち | Claude CodeとCodexのうち、返事を待っているもの（[下記](#対応待ちキー)） |
 
 1つのキーに描く枠は3つまでです。4つ目以降はキーに描きません（トレイアプリの一覧では確認できます）。
 
@@ -59,9 +60,26 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
 - 「未接続」のときは、ほかのキーと同じくトレイアプリを起動します。
 - このキーには設定画面がなく、長押しにも同じ動作をします。
 
+### 「対応待ち」キー
+
+Claude Code（デスクトップアプリ・VS Code）とCodex（ChatGPT/Codexアプリ・VS Code）のうち、あなたの返事を待っているものの数と、いちばん長く待たせているものを表示します。読み方は [データ取得仕様](data-sources.md#対応待ちclaude-codecodex) を参照してください。
+
+| 表示 | 意味 |
+|---|---|
+| 右上の数字 | 対応待ちの数 |
+| AIの名前と、その下の名前 | いちばん長く待たせているもの。名前はClaudeではセッションの題名、Codexでは作業フォルダー名 |
+| 質問・確認 | 待っている理由。「質問」は答えを、「確認」は操作を待っています |
+| 時間（黄・赤） | 待たせている時間。10分以上で赤 |
+| 対応待ちなし・完了 N件 | 待っているものがない。最近30分に終わった作業の数 |
+| ◯◯ 読めません | そのAIの記録を読めません。対応待ちがあっても表示できない状態です |
+
+- キーを押すと、いちばん長く待たせているもののアプリ（Claude、ChatGPT/Codex、VS Code）を開きます。対応待ちがなく完了があるときは、いちばん新しい完了のアプリを開きます。
+- Codexの承認待ちとGrok Botは、今の版では表示されません。
+- このキーには設定画面がなく、長押しにも同じ動作をします。
+
 ## トレイアプリが起動していないとき
 
-- トレイアプリを終了すると、最大で約17秒後に「未接続」になります。
+- トレイアプリを終了すると、最大で約7秒後に「未接続」になります。
 - 「未接続」のキーを押すと、トレイアプリを起動します。起動を待つ間はすべてのキーに「起動中」と表示し、その間のキー操作は受け付けません。値が出るまで十数秒かかることがあり、最初は「未取得」と表示される場合があります。約10秒たってもトレイアプリが見つからなければ「未接続」に戻ります。Stream Deckアプリを終了しても、起動したトレイアプリは動き続けます。
 - 起動するのは、トレイアプリが前回起動したときに記録した場所（`%LOCALAPPDATA%\AIUsageManager\app-location.json`）のアプリです。設定画面の「トレイアプリの場所」に `AIUsageManager.exe` までの絶対パスを入力した場合は、そちらを優先します。
 - 場所が分からないときは、キーに「アプリの場所を設定」と表示します。トレイアプリを一度手動で起動するか、設定画面で場所を入力してください。
@@ -80,7 +98,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.2.3-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.3.0-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。
