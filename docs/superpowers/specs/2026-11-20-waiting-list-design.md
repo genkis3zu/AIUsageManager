@@ -111,6 +111,7 @@ AIを何本も並行して動かしていると、どれかが利用者の返事
 - 各アプリが Windows に登録しているリンクで開く：Claude のデスクトップアプリは `claude://`、Codex のデスクトップアプリは `codex://`、VS Code は `vscode://`、Grok Bot は `grokbot://`（このPCで4つとも登録を確認済み）。どれを使うかは Claude Code の `entrypoint`、Codex の `originator`・`source` から決める。
 - Windows は、裏で動いているプログラムが別のウィンドウを前に出すことを制限している。リンクで開くと、開かれたアプリ自身が前に出るので、この制限を避けられる。キー入力を送るような方法は使わない。
 - 開けるのはこの4つの決まったリンクだけ（Stream Deck のプラグインと共有データの読み取りで限る）。実際にリンクでアプリが前に出るかは作るときに確かめ、出ないものがあれば利用者に相談する。
+- 確認（2026-11-20）：`claude://` は Claude、`codex://` は ChatGPT（Codex）、`vscode://` は VS Code が前に出た（VS Code は起動していなければ起動する）。`grokbot://` と `grokbot://app` では Grok Bot は前に出なかった。Grok Bot を前に出す方法は、Grok Bot の計画で別に決める。
 - アプリの中の特定の会話までは開かない。
 
 ### 共有データ
