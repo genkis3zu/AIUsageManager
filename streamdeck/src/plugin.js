@@ -1,14 +1,14 @@
 'use strict';
 const { userSid, pipeName, readSnapshot } = require('./pipe');
 const { initialConnection, nextConnection } = require('./state');
-const { ACTIONS, STATUS_ACTION, normalizeKeySettings, nextStyle, nextPalette } = require('./settings');
-const { keyView, statusView, renderKey, STATUS_TITLE } = require('./render');
+const { ACTIONS, STATUS_ACTION, WAITING_ACTION, APP_LINKS, normalizeKeySettings, nextStyle, nextPalette } = require('./settings');
+const { keyView, statusView, waitingView, renderKey, STATUS_TITLE, WAITING_TITLE } = require('./render');
 const { STATUS_PAGES } = require('../../obsidian/src/usage');
 const location = require('./location');
 const { parseArgs, StreamDeck } = require('./streamdeck');
 
 // After a launch the tray app needs a moment to open its pipe and publish its first values.
-const POLL_MS = 15000, LONG_PRESS_MS = 500, RELAUNCH_POLLS_MS = [2000, 5000, 10000], NOTICE_MS = 5000;
+const POLL_MS = 5000, LONG_PRESS_MS = 500, RELAUNCH_POLLS_MS = [2000, 5000, 10000], NOTICE_MS = 5000;
 const SETTING_KEYS = ['style', 'metric', 'showReset', 'palette'];
 const STATUS_SETTINGS = { palette: 'green' };
 
@@ -23,7 +23,7 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     const key = keys.get(context);
     if (!key) return;
     const view = key.notice ? message(key, key.notice) : starting ? message(key, '起動中') :
-      key.status ? statusView(connection) : keyView(key.service, connection, key.settings, now());
+      key.status ? statusView(connection) : key.waiting ? waitingView(connection, now()) : keyView(key.service, connection, key.settings, now());
     if (!key.notice && !starting) key.needsLogin = view.needsLogin === true;
     const svg = renderKey(view, key.settings);
     if (svg === key.lastImage) return;
@@ -73,6 +73,13 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
       return;
     }
     // The AIの状況 key opens the status page of the company with the problem; only the two fixed pages can open.
+    // The 対応待ち key opens the app of the longest wait (or the newest finished item); only the four fixed links can open.
+    if (key.waiting) {
+      const items = connection.snapshot && connection.snapshot.waiting ? connection.snapshot.waiting.items : [];
+      const app = items.length ? items[0].app : null;
+      if (app && Object.prototype.hasOwnProperty.call(APP_LINKS, app)) deck.openUrl(APP_LINKS[app]);
+      return;
+    }
     if (key.status) {
       const page = connection.snapshot && connection.snapshot.status && connection.snapshot.status.page;
       deck.openUrl(STATUS_PAGES.includes(page) ? page : STATUS_PAGES[0]);
@@ -96,7 +103,9 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     switch (event) {
       case 'willAppear': {
         const service = ACTIONS[message.action];
-        if (message.action === STATUS_ACTION) {
+        if (message.action === WAITING_ACTION) {
+          keys.set(context, { service: null, title: WAITING_TITLE, waiting: true, settings: STATUS_SETTINGS, notice: null, lastImage: null, pressedAt: null });
+        } else if (message.action === STATUS_ACTION) {
           keys.set(context, { service: null, title: STATUS_TITLE, status: true, settings: STATUS_SETTINGS, notice: null, lastImage: null, pressedAt: null });
         } else {
           if (!service) return;
@@ -115,7 +124,7 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
         return;
       case 'didReceiveSettings': {
         const key = keys.get(context);
-        if (!key || key.status) return;
+        if (!key || key.status || key.waiting) return;
         key.settings = normalizeKeySettings(key.service, payload.settings);
         render(context);
         return;

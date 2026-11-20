@@ -44,11 +44,11 @@ test('a pipe name that could not be found is looked up again on the next poll', 
   await plugin.poll();
   assert.deepEqual(seen, [null, 'PIPE']);
 });
-test('first key polls immediately and starts one 15 s timer', async () => {
+test('first key polls immediately and starts one 5 s timer', async () => {
   const h = harness();
   await h.plugin.handle(appear('k1'));
   assert.equal(h.reads(), 1);
-  assert.deepEqual(h.timers.intervals.map(t => t.ms), [15000]);
+  assert.deepEqual(h.timers.intervals.map(t => t.ms), [5000]);
   assert.ok(h.images('k1').at(-1).includes('30%'));
   await h.plugin.handle(appear('k2', ID + '.grok'));
   assert.equal(h.reads(), 1); assert.equal(h.timers.intervals.length, 1);
@@ -210,6 +210,37 @@ test('didReceiveSettings replaces the key settings', async () => {
   await h.plugin.handle(appear('k1'));
   await h.plugin.handle({ event: 'didReceiveSettings', context: 'k1', payload: { settings: { style: 'vertical', metric: 'remaining', showReset: true, palette: 'green' } } });
   assert.ok(h.images('k1').at(-1).includes('70%'));
+});
+const withWaiting = waiting => { const s = JSON.parse(SNAP); s.waiting = waiting; return JSON.stringify(s); };
+const waitAt = (service, minutes, app, reason = 'question') => ({ service, place: 'p', reason, since: new Date(Date.now() - minutes * 60000).toISOString(), app });
+test('pressing the waiting key opens the app of the longest wait', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withWaiting({ items: [waitAt('Claude', 12, 'claude'), waitAt('Codex', 4, 'codex')], unreadable: [] }) }] });
+  await h.plugin.handle(appear('w1', ID + '.waiting', { style: 'ring' }));
+  assert.ok(h.images('w1').at(-1).includes('>対応待ち<')); assert.deepEqual(h.settings('w1'), []);
+  await press(h, 'w1', 100); await press(h, 'w1', 700);
+  assert.deepEqual(h.opened(), ['claude://', 'claude://']); assert.deepEqual(h.launches, []);
+});
+test('without waits the waiting key opens the app of the newest finished item, or nothing', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withWaiting({ items: [waitAt('Codex', 2, 'vscode', 'finished')], unreadable: [] }) }] });
+  await h.plugin.handle(appear('w1', ID + '.waiting'));
+  await press(h, 'w1', 100);
+  assert.deepEqual(h.opened(), ['vscode://']);
+  const empty = harness();
+  await empty.plugin.handle(appear('w1', ID + '.waiting'));
+  await press(empty, 'w1', 100);
+  assert.deepEqual(empty.opened(), []);
+});
+test('a waiting key never opens a link outside the four apps', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withWaiting({ items: [waitAt('Claude', 12, 'https')], unreadable: [] }) }] });
+  await h.plugin.handle(appear('w1', ID + '.waiting'));
+  await press(h, 'w1', 100);
+  assert.deepEqual(h.opened(), []);
+});
+test('a disconnected waiting key starts the tray app', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }] });
+  await h.plugin.handle(appear('w1', ID + '.waiting'));
+  await press(h, 'w1', 100);
+  assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.opened(), []);
 });
 const withStatus = status => { const s = JSON.parse(SNAP); s.status = status; return JSON.stringify(s); };
 const OUTAGE = { tone: 'warning', title: 'OpenAI 一部不調', detail: 'Codex', page: 'https://status.openai.com/', line: 'OpenAI 一部不調（Codex）' };

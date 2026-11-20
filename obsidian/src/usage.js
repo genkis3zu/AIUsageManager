@@ -22,14 +22,23 @@ function parseStatus(v) {
   if(!v || typeof v!=='object' || Array.isArray(v) || !STATUS_TONES.includes(v.tone)) return null;
   return {tone:v.tone,title:text(v.title,60),detail:text(v.detail),page:STATUS_PAGES.includes(v.page)?v.page:null,line:text(v.line),providers:parseProviders(v.providers)};
 }
+// The tray app's 対応待ち list: sessions waiting for the user. Only known services, reasons and the four app links pass.
+const WAIT_SERVICES = ['Claude', 'Codex', 'Grok Bot'], WAIT_REASONS = ['question', 'confirm', 'finished'], WAIT_APPS = ['claude', 'codex', 'vscode', 'grokbot'];
+function parseWaiting(v) {
+  if(!v || typeof v!=='object' || Array.isArray(v)) return {items:[],unreadable:[]};
+  const items=(Array.isArray(v.items)?v.items:[]).filter(i=>i && typeof i==='object' && WAIT_SERVICES.includes(i.service) && WAIT_REASONS.includes(i.reason) && WAIT_APPS.includes(i.app) && date(i.since)).slice(0,8)
+    .map(i=>({service:i.service,place:text(i.place,40),reason:i.reason,since:i.since,app:i.app}));
+  const unreadable=(Array.isArray(v.unreadable)?v.unreadable:[]).filter(u=>u && typeof u==='object' && WAIT_SERVICES.includes(u.service)).slice(0,3).map(u=>({service:u.service,reason:text(u.reason,40)}));
+  return {items,unreadable};
+}
 function emptyServices() { return names.map(name => ({name, plan:'', source:'', status:'', recordedAt:null, needsLogin:false, windows:[]})); }
 function parseSnapshot(json) {
   if(typeof json !== 'string' || Buffer.byteLength(json, 'utf8') > 65536) throw new Error('Invalid snapshot');
   const value=JSON.parse(json);
   if(!value || value.schemaVersion!==2 || typeof value.connected!=='boolean' || !Array.isArray(value.services)) throw new Error('Invalid snapshot');
-  if(!value.connected) return {connected:false, refreshing:false, status:null, services:emptyServices()};
+  if(!value.connected) return {connected:false, refreshing:false, status:null, waiting:{items:[],unreadable:[]}, services:emptyServices()};
   if(value.services.length!==3 || names.some(name=>value.services.filter(s=>s?.name===name).length!==1)) throw new Error('Invalid services');
-  return {connected:true, refreshing:value.refreshing===true, status:parseStatus(value.status), services:names.map(name=> {
+  return {connected:true, refreshing:value.refreshing===true, status:parseStatus(value.status), waiting:parseWaiting(value.waiting), services:names.map(name=> {
     const s=value.services.find(s=>s.name===name);
     if(!Array.isArray(s.windows) || s.windows.length>4) throw new Error('Invalid windows');
     const seen=new Set();

@@ -50,6 +50,20 @@ function statusView(connection) {
   return { ...base, kind: 'status', tone: status.tone, lines, detail: status.detail, page: status.page };
 }
 
+const WAITING_TITLE = '対応待ち';
+const REASON_WORDS = { question: '質問', confirm: '確認', finished: '完了' };
+// The 対応待ち key: how many sessions wait, and the one that has waited longest.
+function waitingView(connection, now) {
+  const base = { title: WAITING_TITLE, kind: 'message', message: '', caption: '', tone: 'muted', bars: [] };
+  if (connection.status === 'loading') return { ...base, kind: 'loading', message: '読み込み中' };
+  if (connection.status !== 'connected' || !connection.snapshot) return { ...base, message: '未接続' };
+  const { items, unreadable } = connection.snapshot.waiting;
+  const waits = items.filter(i => i.reason !== 'finished'), first = waits[0];
+  const top = first ? { service: first.service, place: first.place, reason: REASON_WORDS[first.reason], minutes: Math.max(0, Math.floor((now - Date.parse(first.since)) / 60000)) } : null;
+  const tone = !top ? 'muted' : top.minutes >= 10 ? 'critical' : 'warning';
+  return { ...base, kind: 'waiting', count: waits.length, top, finished: items.length - waits.length, unreadable: unreadable.map(u => u.service), tone };
+}
+
 const FONT = "'Segoe UI','Yu Gothic UI','Meiryo',sans-serif";
 const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const text = (x, y, value, size, fill, weight = 400, anchor = 'middle') =>
@@ -91,6 +105,17 @@ function statusRows(view, palette) {
   const note = view.note ? wrap(view.note, 120 / 11) : [];
   const noteYs = rows.length <= 2 ? (note.length === 1 ? [116] : [110, 126]) : (note.length === 1 ? [120] : [114, 128]);
   return body + note.map((line, i) => text(72, noteYs[i], line, 11, view.noteTone === 'reset' ? palette.accent : palette.muted)).join('');
+}
+const minutesText = minutes => minutes < 60 ? minutes + '分' : Math.floor(minutes / 60) + '時間' + minutes % 60 + '分';
+function waitingBody(view, palette) {
+  const color = toneColor(palette, view.tone);
+  const note = view.unreadable.length ? text(72, 136, fitWidth(view.unreadable.join('・') + ' 読めません', 120 / 11), 11, palette.muted) : '';
+  if (!view.top) return text(72, 76, '対応待ちなし', 16, palette.text, 700) + (view.finished ? text(72, 102, '完了 ' + view.finished + '件', 13, palette.accent, 700) : '') + note;
+  const time = minutesText(view.top.minutes), size = Math.max(14, Math.min(26, Math.floor(124 / widthEm(time))));
+  return text(132, 22, String(view.count), 18, color, 700, 'end') +
+    text(72, 56, fitWidth(view.top.service, 124 / 18), 18, palette.text, 700) +
+    (view.top.place ? text(72, 78, fitWidth(view.top.place, 124 / 13), 13, palette.muted) : '') +
+    text(72, 100, view.top.reason, 13, color, 700) + text(72, 128, time, size, color, 700);
 }
 function statusBody(view, palette) {
   if (view.rows) return statusRows(view, palette);
@@ -165,6 +190,7 @@ function renderKey(view, settings) {
   const palette = paletteFor(settings.palette);
   let body;
   if (view.kind === 'status') body = statusBody(view, palette);
+  else if (view.kind === 'waiting') body = waitingBody(view, palette);
   else if (view.kind !== 'usage') body = text(72, 86, view.message, view.message.length > 6 ? 14 : 18, view.kind === 'loading' ? palette.muted : palette.text, 700);
   else {
     // A caption (e.g. 保存された値) takes the bottom line instead of the reset time.
@@ -178,4 +204,4 @@ function renderKey(view, settings) {
     text(12, 21, view.title, 15, palette.text, 700, 'start') + body + '</svg>';
 }
 
-module.exports = { keyView, statusView, renderKey, STATUS_TITLE };
+module.exports = { keyView, statusView, waitingView, renderKey, STATUS_TITLE, WAITING_TITLE };

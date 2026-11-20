@@ -3,6 +3,9 @@ const PLUGIN = 'io.github.genkis3zu.aiusagemanager';
 const ACTIONS = { [PLUGIN + '.claude']: 'Claude', [PLUGIN + '.codex']: 'Codex', [PLUGIN + '.grok']: 'Grok' };
 // The AIの状況 key (outages and weekly resets) has no settings of its own.
 const STATUS_ACTION = PLUGIN + '.status';
+// The 対応待ち key (sessions waiting for the user) has no settings either; pressing it opens one of these four apps.
+const WAITING_ACTION = PLUGIN + '.waiting';
+const APP_LINKS = { claude: 'claude://', codex: 'codex://', vscode: 'vscode://', grokbot: 'grokbot://' };
 const STYLES = ['ring', 'vertical', 'horizontal'];
 const METRICS = ['used', 'remaining'];
 const PALETTES = [
@@ -32,4 +35,4 @@ function nextStyle(style) { return nextIn(STYLES, style); }
 function nextPalette(id) { return nextIn(PALETTES.map(p => p.id), id); }
 function paletteFor(id) { return PALETTES.find(p => p.id === id) || PALETTES[0]; }
 
-module.exports = { ACTIONS, STATUS_ACTION, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };
+module.exports = { ACTIONS, STATUS_ACTION, WAITING_ACTION, APP_LINKS, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };

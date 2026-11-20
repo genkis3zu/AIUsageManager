@@ -2,14 +2,14 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { initialConnection, nextConnection } = require('../src/state');
 const { ACTIONS, STATUS_ACTION, PALETTES, STYLES, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor } = require('../src/settings');
-const { keyView, statusView, renderKey } = require('../src/render');
+const { keyView, statusView, waitingView, renderKey } = require('../src/render');
 
 const RECORDED = '2026-11-19T00:00:00.000Z', NOW = Date.parse(RECORDED) + 60000, LATER_RESET = '2026-11-21T00:00:00.000Z';
 const SHAPE = { '5時間': ['5h', '5h'], '週': ['週', 'week'] };
 const win = (label, percent, resetsAt = LATER_RESET) => ({ label, shortLabel: (SHAPE[label] || [label.slice(2, -1), 'week'])[0], span: (SHAPE[label] || [0, 'week'])[1], percent, resetsAt, pace: null, alert: null });
-function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null, aiStatus = null } = {}) {
+function snap({ claude = [10, 20], codex = 30, grok = 40, recordedAt = RECORDED, source = 'オンライン', status = '', needsLogin = {}, refreshing = false, resetsAt = LATER_RESET, claudeResets = [resetsAt, resetsAt], claudeWindows = null, aiStatus = null, waiting = null } = {}) {
   const service = (name, windows) => ({ name, plan: 'Pro', source, status, needsLogin: needsLogin[name] === true, recordedAt, windows });
-  return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, ...(aiStatus ? { status: aiStatus } : {}), services: [
+  return JSON.stringify({ schemaVersion: 2, connected: true, generatedAt: recordedAt, refreshing, ...(aiStatus ? { status: aiStatus } : {}), ...(waiting ? { waiting } : {}), services: [
     service('Claude', claudeWindows ? claudeWindows.map(([label, percent, at]) => win(label, percent, at)) : [win('5時間', claude[0], claudeResets[0]), win('週', claude[1], claudeResets[1])]),
     service('Codex', [win('週', codex, resetsAt)]),
     service('Grok', [win('週', grok, resetsAt)]),
@@ -243,6 +243,31 @@ test('status key: company lines are coloured by state and fit the key', () => {
   assert.match(ok, new RegExp(`fill="${p.accent}"[^>]*>正常<`)); assert.match(ok, new RegExp(`fill="${p.warning}"[^>]*>一部不調<`));
   const sizes = [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
   assert.ok(Math.min(...sizes) >= 10 && Math.max(...sizes) <= 16, String(sizes));
+});
+const waitItem = (service, minutes, reason = 'question', place = 'Fix login', app = 'claude') => ({ service, place, reason, since: new Date(NOW - minutes * 60000).toISOString(), app });
+const waitingOf = waiting => waitingView(connected({ waiting }), NOW);
+test('waiting key shows the longest wait first', () => {
+  const v = waitingOf({ items: [waitItem('Claude', 12), waitItem('Codex', 4, 'question', 'web-app', 'codex')], unreadable: [] });
+  assert.deepEqual([v.kind, v.title, v.count, v.top.service, v.top.place, v.top.reason, v.top.minutes, v.tone], ['waiting', '対応待ち', 2, 'Claude', 'Fix login', '質問', 12, 'critical']);
+  assert.equal(waitingOf({ items: [waitItem('Codex', 4, 'confirm')], unreadable: [] }).tone, 'warning');
+  const svg = renderKey(v, { palette: 'green' });
+  for (const t of ['>対応待ち<', '>2<', '>Claude<', '>Fix login<', '>12分<']) assert.ok(svg.includes(t), t);
+});
+test('waiting key without waits says 対応待ちなし and counts finished', () => {
+  const v = waitingOf({ items: [waitItem('Claude', 3, 'finished')], unreadable: [{ service: 'Codex', reason: '記録を読めません' }] });
+  assert.deepEqual([v.count, v.top, v.finished, v.tone, v.unreadable], [0, null, 1, 'muted', ['Codex']]);
+  const svg = renderKey(v, { palette: 'green' });
+  assert.ok(svg.includes('>対応待ちなし<') && svg.includes('>完了 1件<'));
+  assert.ok(renderKey(waitingOf({ items: [], unreadable: [] }), { palette: 'green' }).includes('>対応待ちなし<'));
+  assert.deepEqual([waitingView(initialConnection(), NOW)].map(x => [x.kind, x.message]), [['loading', '読み込み中']]);
+  assert.deepEqual([waitingView(nextConnection(initialConnection(), { kind: 'absent' }), NOW)].map(x => [x.kind, x.message]), [['message', '未接続']]);
+});
+test('waiting key text is escaped and fits', () => {
+  const v = waitingOf({ items: [waitItem('Claude', 75, 'question', '<b>' + 'とても長い作業の名前'.repeat(4))], unreadable: [] });
+  const svg = renderKey(v, { palette: 'green' });
+  assert.ok(!svg.includes('<b>') && svg.includes('&lt;b&gt;') && svg.includes('…') && svg.includes('>1時間15分<'));
+  const sizes = [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
+  assert.ok(Math.min(...sizes) >= 10, String(sizes));
 });
 test('state: one failure keeps last values; two disconnect; success resets', () => {
   const first = connected();

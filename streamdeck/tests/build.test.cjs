@@ -2,7 +2,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs'), path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { ACTIONS, STATUS_ACTION, PALETTES } = require('../src/settings');
+const { ACTIONS, STATUS_ACTION, WAITING_ACTION, PALETTES } = require('../src/settings');
 
 const root = path.resolve(__dirname, '..', '..');
 const out = path.join(root, 'build', 'streamdeck', 'io.github.genkis3zu.aiusagemanager.sdPlugin');
@@ -16,14 +16,14 @@ test('build writes exactly the plugin files', () => {
 });
 test('manifest has the plugin identity, Node 24, three usage keys and the AIの状況 key', () => {
   const m = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
-  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.2.3.0');
+  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.3.0.0');
   assert.equal(m.CodePath, 'bin/plugin.cjs'); assert.deepEqual(m.Nodejs, { Version: '24' }); assert.equal(m.SDKVersion, 2);
   assert.equal(m.Software.MinimumVersion, '7.6'); assert.deepEqual(m.OS, [{ Platform: 'windows', MinimumVersion: '10' }]);
   assert.equal(m.Icon, 'imgs/plugin'); assert.equal(m.CategoryIcon, 'imgs/category'); assert.equal(m.Category, 'AI Usage Manager');
-  assert.deepEqual(m.Actions.map(a => [a.UUID, a.Name]), [...Object.entries(ACTIONS).map(([uuid, name]) => [uuid, name + ' 使用量']), [STATUS_ACTION, 'AIの状況']]);
+  assert.deepEqual(m.Actions.map(a => [a.UUID, a.Name]), [...Object.entries(ACTIONS).map(([uuid, name]) => [uuid, name + ' 使用量']), [STATUS_ACTION, 'AIの状況'], [WAITING_ACTION, '対応待ち']]);
   for (const a of m.Actions) {
     // The AIの状況 key has nothing to set, so it has no settings panel.
-    assert.equal(a.PropertyInspectorPath, a.UUID === STATUS_ACTION ? undefined : 'ui/settings.html', a.UUID);
+    assert.equal(a.PropertyInspectorPath, [STATUS_ACTION, WAITING_ACTION].includes(a.UUID) ? undefined : 'ui/settings.html', a.UUID);
     assert.deepEqual(a.Controllers, ['Keypad']); assert.equal(a.Icon, 'imgs/action');
     assert.equal(a.SupportedInMultiActions, false); assert.equal(a.UserTitleEnabled, false); assert.deepEqual(a.States, [{ Image: 'imgs/key', ShowTitle: false }]);
   }
