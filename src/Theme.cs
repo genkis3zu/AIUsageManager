@@ -47,17 +47,28 @@ namespace AIUsageManager
             }
             return NotificationMode.All;
         }
+        public WaitingNoticeMode LoadWaiting()
+        {
+            foreach(string line in ReadSettings().Split('\n')) {
+                if(line.Trim()=="waiting=off")return WaitingNoticeMode.Off;
+                if(line.Trim()=="waiting=frequent")return WaitingNoticeMode.Frequent;
+            }
+            return WaitingNoticeMode.Standard;
+        }
         public bool Save(ThemeMode mode)
-        { return Save(mode,LoadNotifications()); }
+        { return Save(mode,LoadNotifications(),LoadWaiting()); }
         public bool SaveNotifications(NotificationMode mode)
-        { return Save(Load(),mode); }
-        bool Save(ThemeMode mode,NotificationMode notifications)
+        { return Save(Load(),mode,LoadWaiting()); }
+        public bool SaveWaiting(WaitingNoticeMode mode)
+        { return Save(Load(),LoadNotifications(),mode); }
+        bool Save(ThemeMode mode,NotificationMode notifications,WaitingNoticeMode waiting)
         {
             string value = mode == ThemeMode.Dark ? "dark" : mode == ThemeMode.Light ? "light" : "system";
             string alertValue=notifications==NotificationMode.Off?"off":notifications==NotificationMode.Thresholds?"thresholds":"all";
             try
             {
-                File.WriteAllText(path + ".tmp", "theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine);
+                string waitingValue=waiting==WaitingNoticeMode.Off?"off":waiting==WaitingNoticeMode.Frequent?"frequent":"standard";
+                File.WriteAllText(path + ".tmp", "theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine+"waiting="+waitingValue+Environment.NewLine);
                 if (File.Exists(path)) File.Replace(path + ".tmp", path, null);
                 else File.Move(path + ".tmp", path);
                 return true;

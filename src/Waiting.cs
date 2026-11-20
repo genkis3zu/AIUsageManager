@@ -169,6 +169,107 @@ namespace AIUsageManager
         }
         public static string App(CodexThread thread) { return thread != null && thread.Source == "vscode" ? "vscode" : "codex"; }
     }
+    public enum WaitReason { Question, Confirm, Finished }
+    public sealed class WaitingItem
+    {
+        public string Key, Service, Place, App;
+        public WaitReason Reason;
+        public DateTimeOffset Since;
+    }
+    public sealed class WaitingUnreadable { public string Service, Reason; }
+    public sealed class WaitingList
+    {
+        public WaitingItem[] Items = new WaitingItem[0];
+        public WaitingUnreadable[] Unreadable = new WaitingUnreadable[0];
+    }
+    // Builds the list: waits (question, confirm) oldest first, then finished items newest first for 30 minutes.
+    // A finished item needs the tracker to have seen the same session working, so nothing finished before start-up is shown.
+    public sealed class WaitingTracker
+    {
+        static readonly TimeSpan FinishedFor = TimeSpan.FromMinutes(30);
+        readonly Dictionary<string, string> lastState = new Dictionary<string, string>();
+        readonly Dictionary<string, DateTimeOffset> finished = new Dictionary<string, DateTimeOffset>();
+        readonly Dictionary<string, DateTimeOffset> firstSeen = new Dictionary<string, DateTimeOffset>();
+        public WaitingList Observe(ClaudeSession[] claude, bool claudeReadable, CodexThread[] codex, bool codexReadable, DateTimeOffset now)
+        {
+            var items = new List<WaitingItem>(); var present = new HashSet<string>();
+            foreach (var session in claude ?? new ClaudeSession[0])
+            {
+                if (session == null) continue;
+                string key = "Claude/" + session.SessionId, state = session.Status == "waiting" ? "waiting" : session.Status == "busy" ? "busy" : session.Status == "idle" ? "idle" : "other";
+                present.Add(key);
+                var reason = state == "waiting" ? (session.WaitingFor == "input needed" ? WaitReason.Question : WaitReason.Confirm) : WaitReason.Finished;
+                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), WaitingNames.ClaudeApp(session.Entrypoint), reason, session.StatusUpdatedAt, now);
+            }
+            foreach (var thread in codex ?? new CodexThread[0])
+            {
+                if (thread == null) continue;
+                string key = "Codex/" + (thread.Id ?? thread.Cwd ?? ""), state = thread.State == CodexState.Question ? "waiting" : thread.State == CodexState.Finished ? "idle" : thread.State == CodexState.Working ? "busy" : "other";
+                present.Add(key);
+                Add(items, key, state, "busy", "Codex", WaitingNames.Place(null, thread.Cwd), CodexSessions.App(thread), WaitReason.Question, thread.Since, now);
+            }
+            foreach (var gone in lastState.Keys.Where(k => !present.Contains(k)).ToArray()) { lastState.Remove(gone); finished.Remove(gone); firstSeen.Remove(gone); }
+            var unreadable = new List<WaitingUnreadable>();
+            if (!claudeReadable) unreadable.Add(new WaitingUnreadable { Service = "Claude", Reason = "記録を読めません" });
+            if (!codexReadable) unreadable.Add(new WaitingUnreadable { Service = "Codex", Reason = "記録を読めません" });
+            var waits = items.Where(i => i.Reason != WaitReason.Finished).OrderBy(i => i.Since);
+            var done = items.Where(i => i.Reason == WaitReason.Finished).OrderByDescending(i => i.Since);
+            return new WaitingList { Items = waits.Concat(done).ToArray(), Unreadable = unreadable.ToArray() };
+        }
+        void Add(List<WaitingItem> items, string key, string state, string working, string service, string place, string app, WaitReason waitReason, DateTimeOffset? at, DateTimeOffset now)
+        {
+            string previous; lastState.TryGetValue(key, out previous); lastState[key] = state;
+            if (state != "waiting") firstSeen.Remove(key);
+            if (state == "waiting")
+            {
+                finished.Remove(key);
+                DateTimeOffset seen;
+                if (!firstSeen.TryGetValue(key, out seen)) { seen = now; firstSeen[key] = now; }
+                items.Add(new WaitingItem { Key = key, Service = service, Place = place, App = app, Reason = waitReason, Since = Clamp(at ?? seen, now) });
+                return;
+            }
+            if (state != "idle") { finished.Remove(key); return; }
+            DateTimeOffset since;
+            if (!finished.TryGetValue(key, out since))
+            {
+                if (previous != working && previous != "waiting") return;
+                since = Clamp(at ?? now, now); finished[key] = since;
+            }
+            if (now - since <= FinishedFor) items.Add(new WaitingItem { Key = key, Service = service, Place = place, App = app, Reason = WaitReason.Finished, Since = since });
+        }
+        static DateTimeOffset Clamp(DateTimeOffset at, DateTimeOffset now) { return at > now ? now : at; }
+    }
+    public enum WaitingNoticeMode { Standard, Frequent, Off }
+    // Windows notifications for waits that go on: first after 3 (or 1) minutes, then every 10 (or 5), never after 60 minutes.
+    public sealed class WaitingReminders
+    {
+        static readonly TimeSpan Limit = TimeSpan.FromMinutes(60);
+        readonly Dictionary<string, KeyValuePair<DateTimeOffset, DateTimeOffset>> sent = new Dictionary<string, KeyValuePair<DateTimeOffset, DateTimeOffset>>();
+        public string[] Due(WaitingItem[] items, DateTimeOffset now, WaitingNoticeMode mode)
+        {
+            var due = new List<string>(); var current = new HashSet<string>();
+            TimeSpan first = TimeSpan.FromMinutes(mode == WaitingNoticeMode.Frequent ? 1 : 3), repeat = TimeSpan.FromMinutes(mode == WaitingNoticeMode.Frequent ? 5 : 10);
+            foreach (var item in items ?? new WaitingItem[0])
+            {
+                if (item == null || item.Reason == WaitReason.Finished) continue;
+                current.Add(item.Key);
+                var waited = now - item.Since;
+                KeyValuePair<DateTimeOffset, DateTimeOffset> last;
+                bool known = sent.TryGetValue(item.Key, out last) && last.Key == item.Since;
+                if (mode == WaitingNoticeMode.Off || waited > Limit) continue;
+                if (known ? now - last.Value < repeat : waited < first) continue;
+                sent[item.Key] = new KeyValuePair<DateTimeOffset, DateTimeOffset>(item.Since, now);
+                due.Add(Text(item, (int)Math.Floor(waited.TotalMinutes)));
+            }
+            foreach (var gone in sent.Keys.Where(k => !current.Contains(k)).ToArray()) sent.Remove(gone);
+            return due.ToArray();
+        }
+        static string Text(WaitingItem item, int minutes)
+        {
+            string who = string.IsNullOrEmpty(item.Place) ? item.Service : item.Service + "（" + item.Place + "）";
+            return who + "が" + (item.Reason == WaitReason.Question ? "質問の答え" : "確認") + "を" + minutes + "分待っています";
+        }
+    }
     public static class WaitingNames
     {
         // The session name first; otherwise the project folder (a Claude worktree …\<project>\.claude\worktrees\<x> shows <project>).

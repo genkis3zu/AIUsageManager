@@ -29,6 +29,10 @@ internal static partial class Tests
     // Lines as written (oldest first) are handed to Classify newest first.
     static CodexThread Classify(params string[] lines)
     { return CodexSessions.Classify(lines[0], lines.Reverse()); }
+    static ClaudeSession ClaudeAt(string id, string status, string waitingFor, DateTimeOffset? at)
+    { return new ClaudeSession { Pid = 1, SessionId = id, Status = status, WaitingFor = waitingFor, StatusUpdatedAt = at, Name = id + "-name", Cwd = @"C:\src\x", Entrypoint = "claude-desktop" }; }
+    static CodexThread CodexAt(string id, CodexState state, DateTimeOffset? at)
+    { return new CodexThread { Id = id, State = state, Since = at, Cwd = @"C:\src\web-app", Source = "vscode" }; }
     static void RunWaitingTests()
     {
         Check("Claude session files give status, reason and start time", () => {
@@ -108,5 +112,77 @@ internal static partial class Tests
             }
             finally { Directory.Delete(profile, true); }
         });
-   }
+        Check("Waiting items come first, oldest first; finished items follow, newest first", () => {
+            var tracker = new WaitingTracker();
+            var busy = new[] { ClaudeAt("a", "busy", null, T), ClaudeAt("b", "busy", null, T) };
+            tracker.Observe(busy, true, new CodexThread[0], true, T);
+            var list = tracker.Observe(new[] { ClaudeAt("a", "idle", null, T.AddMinutes(5)), ClaudeAt("b", "idle", null, T.AddMinutes(8)), ClaudeAt("c", "waiting", "input needed", T.AddMinutes(9)), ClaudeAt("d", "waiting", "dialog open", T.AddMinutes(2)) },
+                true, new CodexThread[0], true, T.AddMinutes(10));
+            Assert(string.Join(",", list.Items.Select(i => i.Key)) == "Claude/d,Claude/c,Claude/b,Claude/a");
+            Assert(list.Items[0].Reason == WaitReason.Confirm && list.Items[1].Reason == WaitReason.Question && list.Items[2].Reason == WaitReason.Finished);
+            Assert(list.Items[1].Service == "Claude" && list.Items[1].Place == "c-name" && list.Items[1].App == "claude" && list.Items[1].Since == T.AddMinutes(9));
+        });
+        Check("Claude idle counts as finished only after the tracker saw it busy", () => {
+            var tracker = new WaitingTracker();
+            Assert(tracker.Observe(new[] { ClaudeAt("a", "idle", null, T) }, true, new CodexThread[0], true, T).Items.Length == 0);
+            Assert(tracker.Observe(new[] { ClaudeAt("a", "busy", null, T.AddMinutes(1)) }, true, new CodexThread[0], true, T.AddMinutes(1)).Items.Length == 0);
+            var list = tracker.Observe(new[] { ClaudeAt("a", "idle", null, T.AddMinutes(2)) }, true, new CodexThread[0], true, T.AddMinutes(2));
+            Assert(list.Items.Length == 1 && list.Items[0].Reason == WaitReason.Finished && list.Items[0].Since == T.AddMinutes(2));
+            Assert(tracker.Observe(new[] { ClaudeAt("a", "idle", null, T.AddMinutes(2)) }, true, new CodexThread[0], true, T.AddMinutes(3)).Items.Length == 1);
+        });
+        Check("Codex finished threads appear only after they were seen working", () => {
+            var tracker = new WaitingTracker();
+            Assert(tracker.Observe(new ClaudeSession[0], true, new[] { CodexAt("t1", CodexState.Finished, T) }, true, T).Items.Length == 0);
+            tracker.Observe(new ClaudeSession[0], true, new[] { CodexAt("t2", CodexState.Working, T) }, true, T);
+            var list = tracker.Observe(new ClaudeSession[0], true, new[] { CodexAt("t1", CodexState.Finished, T), CodexAt("t2", CodexState.Finished, T.AddMinutes(1)) }, true, T.AddMinutes(1));
+            Assert(list.Items.Length == 1 && list.Items[0].Key == "Codex/t2" && list.Items[0].Service == "Codex" && list.Items[0].Place == "web-app" && list.Items[0].App == "vscode");
+            var asked = tracker.Observe(new ClaudeSession[0], true, new[] { CodexAt("t3", CodexState.Question, T) }, true, T.AddMinutes(2));
+            Assert(asked.Items.Length == 1 && asked.Items[0].Reason == WaitReason.Question);
+        });
+        Check("Finished items disappear after 30 minutes", () => {
+            var tracker = new WaitingTracker();
+            tracker.Observe(new[] { ClaudeAt("a", "busy", null, T) }, true, new CodexThread[0], true, T);
+            Assert(tracker.Observe(new[] { ClaudeAt("a", "idle", null, T) }, true, new CodexThread[0], true, T.AddMinutes(30)).Items.Length == 1);
+            Assert(tracker.Observe(new[] { ClaudeAt("a", "idle", null, T) }, true, new CodexThread[0], true, T.AddMinutes(31)).Items.Length == 0);
+        });
+        Check("A start time in the future counts as now", () => {
+            var list = new WaitingTracker().Observe(new[] { ClaudeAt("a", "waiting", "input needed", T.AddMinutes(5)) }, true, new CodexThread[0], true, T);
+            Assert(list.Items[0].Since == T);
+            Assert(new WaitingTracker().Observe(new[] { ClaudeAt("b", "waiting", "input needed", null) }, true, new CodexThread[0], true, T).Items[0].Since == T);
+        });
+        Check("Unreadable sources are named, never shown as nothing waiting", () => {
+            var list = new WaitingTracker().Observe(new ClaudeSession[0], false, new CodexThread[0], false, T);
+            Assert(list.Unreadable.Length == 2 && list.Unreadable[0].Service == "Claude" && list.Unreadable[1].Service == "Codex" && list.Unreadable[0].Reason == "記録を読めません");
+            Assert(new WaitingTracker().Observe(new ClaudeSession[0], true, new CodexThread[0], true, T).Unreadable.Length == 0);
+        });
+        Check("Reminders: 3 minutes, then every 10, never past 60 or for finished items", () => {
+            var item = new WaitingItem { Key = "Claude/a", Service = "Claude", Place = "P", App = "claude", Reason = WaitReason.Question, Since = T };
+            var done = new WaitingItem { Key = "Claude/b", Service = "Claude", Place = "P", App = "claude", Reason = WaitReason.Finished, Since = T };
+            var reminders = new WaitingReminders();
+            Func<int, int> at = m => reminders.Due(new[] { item, done }, T.AddMinutes(m), WaitingNoticeMode.Standard).Length;
+            Assert(at(2) == 0 && at(3) == 1 && at(5) == 0 && at(13) == 1 && at(14) == 0 && at(61) == 0);
+            Assert(new WaitingReminders().Due(new[] { item }, T.AddMinutes(30), WaitingNoticeMode.Off).Length == 0);
+            var frequent = new WaitingReminders();
+            Func<int, int> often = m => frequent.Due(new[] { item }, T.AddMinutes(m), WaitingNoticeMode.Frequent).Length;
+            Assert(often(1) == 1 && often(3) == 0 && often(6) == 1);
+        });
+        Check("Reminder text names the service, place and reason", () => {
+            var item = new WaitingItem { Key = "Claude/a", Service = "Claude", Place = "AIUsageManager", App = "claude", Reason = WaitReason.Question, Since = T };
+            var codex = new WaitingItem { Key = "Codex/t", Service = "Codex", Place = "", App = "codex", Reason = WaitReason.Confirm, Since = T };
+            var texts = new WaitingReminders().Due(new[] { item, codex }, T.AddMinutes(3), WaitingNoticeMode.Standard);
+            Assert(texts.Length == 2 && texts[0] == "Claude（AIUsageManager）が質問の答えを3分待っています" && texts[1] == "Codexが確認を3分待っています");
+        });
+        Check("The waiting notice choice is saved with the other settings", () => {
+            string path = Path.Combine(Path.GetTempPath(), "aum-wait-" + Guid.NewGuid().ToString("N") + ".ini");
+            try
+            {
+                var settings = new ThemeSettings(path);
+                Assert(settings.Save(ThemeMode.Dark) && settings.SaveNotifications(NotificationMode.Thresholds));
+                Assert(settings.LoadWaiting() == WaitingNoticeMode.Standard && settings.SaveWaiting(WaitingNoticeMode.Off));
+                Assert(settings.Load() == ThemeMode.Dark && settings.LoadNotifications() == NotificationMode.Thresholds && settings.LoadWaiting() == WaitingNoticeMode.Off);
+                Assert(settings.Save(ThemeMode.Light) && settings.LoadWaiting() == WaitingNoticeMode.Off && settings.SaveWaiting(WaitingNoticeMode.Frequent) && settings.LoadWaiting() == WaitingNoticeMode.Frequent);
+            }
+            finally { File.Delete(path); }
+        });
+    }
 }
