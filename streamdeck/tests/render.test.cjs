@@ -36,56 +36,74 @@ test('a Claude window the service did not report is not drawn', () => {
 test('a window with a reset time but no percent still shows 未取得', () => {
   assert.deepEqual(view('Claude', { claude: [null, 20] }).bars.map(b => [b.label, b.text]), [['5時間', '未取得'], ['週', '20%']]);
 });
-test('a key draws one weekly bar: the one with the higher use', () => {
-  assert.deepEqual(view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }).bars.map(b => [b.label, b.short, b.text]), [['週（Fable）', 'Fable', '95%']]);
-  assert.deepEqual(view('Claude', { claudeWindows: [['週', 60], ['週（Fable）', 40]] }).bars.map(b => b.text), ['60%']);
-  assert.deepEqual(view('Claude', { claudeWindows: [['週', 50], ['週（Fable）', 50]] }).bars.map(b => b.label), ['週'], 'a tie keeps 週');
-  assert.deepEqual(view('Claude', { claudeWindows: [['週', null], ['週（Fable）', 30]] }).bars.map(b => b.label), ['週（Fable）']);
-  // A window whose reset time has passed holds an old value and does not win over the current one.
-  assert.deepEqual(view('Claude', { claudeWindows: [['週', 40], ['週（Fable）', 99, new Date(NOW - 60000).toISOString()]] }).bars.map(b => b.label), ['週']);
+const SOON = new Date(NOW + 3 * 3600000).toISOString();
+const sizesOf = svg => [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
+test('Claude shows 週 and Fable as two bars', () => {
+  assert.deepEqual(view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }).bars.map(b => [b.label, b.short, b.text]), [['週', '週', '87%'], ['週（Fable）', 'Fable', '95%']]);
 });
-test('Claude Max shows 5h and the higher weekly bar in every style', () => {
+test('Claude Max shows 5h, 週 and Fable bars in every style', () => {
   const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] });
-  assert.deepEqual(v.bars.map(b => [b.label, b.short, b.text]), [['5時間', '5h', '10%'], ['週（Fable）', 'Fable', '86%']]);
+  assert.deepEqual(v.bars.map(b => [b.label, b.short, b.text]), [['5時間', '5h', '10%'], ['週', '週', '20%'], ['週（Fable）', 'Fable', '86%']]);
   for (const style of STYLES) {
     const svg = renderKey(v, { ...defaultSettings('Claude'), style });
-    for (const text of ['>10%<', '>86%<', '>5h<', '>Fable<']) assert.ok(svg.includes(text), style + ' ' + text);
-    assert.ok(!svg.includes('>20%<'), style);
+    for (const text of ['>10%<', '>20%<', '>86%<', '>5h<', '>週<', '>Fable<']) assert.ok(svg.includes(text), style + ' ' + text);
     assert.match(svg, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="144" height="144" viewBox="0 0 144 144">/);
   }
 });
 test('long model names are shortened to fit each layout', () => {
-  const two = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（VeryLongModelName）', 30]] });
-  const three = { title: 'Claude', kind: 'usage', message: '', caption: '', tone: 'normal', bars: ['5h', '週', 'VeryLongModelName'].map(short => ({ label: short, short, value: 10, text: '10%', reset: '1h', tone: 'normal' })) };
+  const three = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（VeryLongModelName）', 30]] });
+  const two = view('Claude', { claudeWindows: [['週', 20], ['週（VeryLongModelName）', 30]] });
   for (const style of STYLES) {
     const svg3 = renderKey(three, { ...defaultSettings('Claude'), style }), svg2 = renderKey(two, { ...defaultSettings('Claude'), style });
     assert.ok(svg3.includes('>Very…<') && !svg3.includes('VeryLongModelName'), style + ' three');
     assert.ok(svg2.includes('>VeryLon…<') && !svg2.includes('VeryLongModelName'), style + ' two');
   }
 });
-test('horizontal keys put a larger reset time at the right edge under each bar', () => {
-  const one = renderKey(view('Codex'), { ...defaultSettings('Codex'), style: 'horizontal' });
-  assert.match(one, /<text x="132" y="128" [^>]*text-anchor="end"><tspan font-size="12" fill="[^"]+">リセット <\/tspan><tspan font-size="18" font-weight="700" fill="[^"]+">1日23h<\/tspan><\/text>/);
-  const two = renderKey(view('Claude'), { ...defaultSettings('Claude'), style: 'horizontal' });
-  const ys = [...two.matchAll(/<text x="132" y="(\d+)" [^>]*text-anchor="end"><tspan font-size="10" fill="[^"]+">リセット <\/tspan><tspan font-size="15" font-weight="700" fill="[^"]+">1日23h<\/tspan>/g)].map(m => Number(m[1]));
-  assert.deepEqual(ys, [72, 122]);
+test('when every bar resets at the same time, the time is shown once at the bottom in every style', () => {
+  const shared = /<text x="132" y="132" [^>]*text-anchor="end"><tspan font-size="12" fill="[^"]+">リセット <\/tspan><tspan font-size="18" font-weight="700" fill="[^"]+">1日23h<\/tspan><\/text>/g;
+  for (const v of [view('Codex'), view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }), view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] })])
+    for (const style of STYLES) {
+      const svg = renderKey(v, { ...defaultSettings(v.title), style });
+      assert.equal([...svg.matchAll(shared)].length, 1, style + ' ' + v.bars.length);
+      assert.equal(svg.split('1日23h').length - 1, 1, style + ' ' + v.bars.length);
+    }
+});
+test('when bars reset at different times, each bar shows its own time', () => {
+  const v = view('Claude', { claudeResets: [SOON, LATER_RESET] });
+  for (const style of STYLES) {
+    const svg = renderKey(v, { ...defaultSettings('Claude'), style });
+    assert.ok(!svg.includes('y="132"'), style);
+    if (style === 'horizontal') {
+      const ys = [...svg.matchAll(/<text x="132" y="(\d+)" [^>]*text-anchor="end"><tspan font-size="12" fill="[^"]+">リセット <\/tspan><tspan font-size="15" font-weight="700" fill="[^"]+">(3h0m|1日23h)<\/tspan>/g)].map(m => [Number(m[1]), m[2]]);
+      assert.deepEqual(ys, [[70, '3h0m'], [120, '1日23h']]);
+    } else {
+      for (const time of ['3h0m', '1日23h']) assert.match(svg, new RegExp(`font-size="14" font-weight="700" fill="[^"]+" text-anchor="middle">${time}<`), style + ' ' + time);
+    }
+  }
   assert.ok(!renderKey(view('Codex', {}, { showReset: false }), { ...defaultSettings('Codex'), style: 'horizontal', showReset: false }).includes('リセット'));
 });
-test('three-bar keys use text of at least 10 px in every style', () => {
-  const v = { title: 'Claude', kind: 'usage', message: '', caption: '', tone: 'normal', bars: ['5h', '週', 'Fable'].map((short, i) => ({ label: short, short, value: 10 * (i + 1), text: 10 * (i + 1) + '%', reset: '2日5h', tone: 'normal' })) };
-  for (const style of STYLES) {
-    const sizes = [...renderKey(v, { ...defaultSettings('Claude'), style }).matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]));
-    assert.ok(sizes.length > 0 && Math.min(...sizes) >= 10, style + ' ' + sizes);
-  }
+test('keys with one or two bars use text of at least 12 px in every style', () => {
+  for (const v of [view('Codex'), view('Codex', { codex: null }), view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }), view('Claude', { claudeResets: [SOON, LATER_RESET] })])
+    for (const style of STYLES) {
+      const sizes = sizesOf(renderKey(v, { ...defaultSettings(v.title), style }));
+      assert.ok(Math.min(...sizes) >= 12, style + ' ' + v.bars.length + ' ' + sizes);
+    }
 });
-test('however many weekly windows there are, one weekly bar is drawn', () => {
+test('three-bar keys use text of at least 10 px in every style', () => {
+  for (const v of [view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] }), view('Claude', { claudeWindows: [['5時間', 10, SOON], ['週', 20], ['週（Fable）', 86]] })])
+    for (const style of STYLES) {
+      const sizes = sizesOf(renderKey(v, { ...defaultSettings('Claude'), style }));
+      assert.ok(sizes.length > 0 && Math.min(...sizes) >= 10, style + ' ' + sizes);
+    }
+});
+test('a fourth window is not drawn', () => {
   const v = view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 30], ['週（Other）', 40]] });
-  assert.deepEqual(v.bars.map(b => b.short), ['5h', 'Other']);
-  for (const style of STYLES) assert.ok(!renderKey(v, { ...defaultSettings('Claude'), style }).includes('>Fable<'));
+  assert.deepEqual(v.bars.map(b => b.short), ['5h', '週', 'Fable']);
+  for (const style of STYLES) assert.ok(!renderKey(v, { ...defaultSettings('Claude'), style }).includes('Other'));
 });
 test('short labels come from the snapshot', () => {
-  const v = view('Claude', { claudeWindows: [['5時間', 74], ['週（Fable）', 91]] });
-  assert.deepEqual(v.bars.map(b => b.short), ['5h', 'Fable']);
+  const v = view('Claude', { claudeWindows: [['週', 74], ['週（Fable）', 91]] });
+  assert.deepEqual(v.bars.map(b => b.short), ['週', 'Fable']);
   for (const style of STYLES) assert.ok(renderKey(v, { ...defaultSettings('Claude'), style }).includes('>Fable<'), style);
 });
 test('Claude has 5時間 and 週 bars, Codex and Grok have 週', () => {

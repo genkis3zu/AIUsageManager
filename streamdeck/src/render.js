@@ -4,17 +4,6 @@ const { paletteFor } = require('./settings');
 
 const shorten = text => { const chars = Array.from(text || ''); return chars.length > 9 ? chars.slice(0, 9).join('') + '…' : chars.join(''); };
 
-// A key draws one weekly bar. When a service reports several weekly windows (Claude: 週 and Fable), the one with
-// the higher use is drawn, because it reaches its limit first. A window whose reset time has passed holds an old value
-// and gives way to a current one; on a tie the first (週) is kept.
-function oneWeekly(windows) {
-  const weekly = windows.filter(w => w.span === 'week');
-  if (weekly.length < 2) return windows;
-  const rank = w => (w.active ? 1000000 : 0) + (w.percent === null ? -1 : w.percent);
-  const keep = weekly.reduce((best, w) => rank(w) > rank(best) ? w : best);
-  return windows.filter(w => w.span !== 'week' || w === keep);
-}
-
 // What one key shows, decided from the shared snapshot with the same rules as the Obsidian toolbar.
 function keyView(name, connection, settings, now) {
   const base = { title: name, kind: 'message', message: '', caption: '', tone: 'muted', bars: [], needsLogin: false };
@@ -26,10 +15,10 @@ function keyView(name, connection, settings, now) {
   if (presented.windows.every(w => w.percent === null)) return { ...base, message: service.needsLogin ? '要ログイン' : '未取得', needsLogin: service.needsLogin === true };
   // A window with neither a percent nor a reset time was not reported by the service at all
   // (Claude no longer returns a 5-hour window), so it is left out when another window has data.
-  const reported = oneWeekly(presented.windows.filter(w => w.percent !== null || w.resetsAt !== null));
+  const reported = presented.windows.filter(w => w.percent !== null || w.resetsAt !== null);
   // Each bar has its own tone, like the Obsidian toolbar: an expired or stale window is muted,
   // and only the window that has an alert takes the warning colour.
-  // With one weekly bar a key normally has one or two bars; at most three are drawn.
+  // A key has room for three bars (Claude Max: 5時間, 週, 週（Fable）); further windows are not drawn.
   const bars = reported.slice(0, 3).map(w => {
     const value = w.percent === null ? null : settings.metric === 'remaining' ? Math.max(0, 100 - w.percent) : w.percent;
     const tone = !w.active ? 'muted' : w.alert ? (w.percent >= 95 ? 'critical' : 'warning') : 'normal';
@@ -117,57 +106,69 @@ function statusBody(view, palette) {
   return lines + detail.map((line, i) => text(72, detailYs[i], line, 11, palette.muted)).join('');
 }
 
-// Layouts for one, two and three bars on a 144×144 key.
-function vertical(view, palette) {
-  const n = view.bars.length, three = n === 3, xs = n === 1 ? [72] : n === 2 ? [44, 100] : [30, 72, 114], w = three ? 18 : 22;
-  return view.bars.map((bar, i) => {
-    const color = toneColor(palette, bar.tone), x = xs[i], height = 54, top = 40, fill = Math.round(height * fraction(bar.value));
-    return text(x, 35, caption(bar, n), 11, palette.muted) +
-      `<rect x="${x - w / 2}" y="${top}" width="${w}" height="${height}" rx="5" fill="${palette.track}"/>` +
-      (fill > 0 ? `<rect x="${x - w / 2}" y="${top + height - fill}" width="${w}" height="${fill}" rx="5" fill="${color}"/>` : '') +
-      text(x, 114, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 15 : 17), bar.value === null ? palette.muted : color, 700) +
-      (view.caption ? '' : text(x, 133, bar.reset, three ? 10 : 11, palette.muted));
-  }).join('');
-}
-// The time to the reset sits at the right edge under its bar: the word リセット small, the time itself large.
+// Layouts for one, two and three bars on a 144×144 key. When every bar resets at the same time (Claude: 週 and
+// Fable), the time is shown once at the bottom; otherwise (`own`) each bar shows its own time under it.
+const timeColor = (palette, bar) => bar.tone === 'muted' ? palette.muted : palette.text;
+// The word リセット small, the time itself large, right-aligned.
 const resetText = (y, value, labelSize, size, fill, muted) =>
   `<text x="132" y="${y}" font-family="${FONT}" text-anchor="end"><tspan font-size="${labelSize}" fill="${muted}">リセット </tspan>` +
   `<tspan font-size="${size}" font-weight="700" fill="${fill}">${esc(value)}</tspan></text>`;
-function horizontal(view, palette) {
-  const n = view.bars.length, three = n === 3, rows = n === 1 ? [68] : n === 2 ? [44, 94] : [34, 68, 102];
+function vertical(view, palette, own) {
+  const n = view.bars.length, three = n === 3, xs = n === 1 ? [72] : n === 2 ? [44, 100] : [30, 72, 114];
+  const w = n === 1 ? 30 : n === 2 ? 26 : 18, top = 44, height = own ? 44 : 46;
   return view.bars.map((bar, i) => {
-    const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value)), h = three ? 7 : 9;
-    const time = bar.tone === 'muted' ? palette.muted : palette.text;
-    const reset = view.caption || !bar.reset ? '' : three ? text(132, y + 23, bar.reset, 10, palette.muted, 400, 'end') :
-      n === 1 ? resetText(128, bar.reset, 12, 18, time, palette.muted) : resetText(y + 28, bar.reset, 10, 15, time, palette.muted);
+    const color = toneColor(palette, bar.tone), x = xs[i], fill = Math.round(height * fraction(bar.value));
+    const size = bar.value === null ? (three ? 11 : 13) : (three ? 15 : n === 2 ? 20 : 24);
+    return text(x, 38, caption(bar, n), three ? 11 : 13, palette.muted) +
+      `<rect x="${x - w / 2}" y="${top}" width="${w}" height="${height}" rx="5" fill="${palette.track}"/>` +
+      (fill > 0 ? `<rect x="${x - w / 2}" y="${top + height - fill}" width="${w}" height="${fill}" rx="5" fill="${color}"/>` : '') +
+      text(x, own ? 108 : 112, bar.text, size, bar.value === null ? palette.muted : color, 700) +
+      (own && bar.reset ? text(x, 128, bar.reset, three ? 11 : 14, timeColor(palette, bar), 700) : '');
+  }).join('');
+}
+function horizontal(view, palette, own) {
+  const n = view.bars.length, three = n === 3;
+  const rows = n === 1 ? [66] : n === 2 ? (own ? [42, 92] : [44, 86]) : (own ? [34, 68, 102] : [34, 64, 94]);
+  return view.bars.map((bar, i) => {
+    const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value));
+    const h = three ? 7 : n === 1 ? 10 : 9, size = bar.value === null ? (three ? 11 : 13) : (three ? 14 : n === 1 ? 22 : 18);
+    const reset = !own || !bar.reset ? '' : three ? text(132, y + 23, bar.reset, 10, palette.muted, 400, 'end') :
+      resetText(y + 28, bar.reset, 12, 15, timeColor(palette, bar), palette.muted);
     return text(12, y, caption(bar, n), three ? 11 : 13, palette.muted, 400, 'start') +
-      text(132, y, bar.text, bar.value === null ? (three ? 11 : 13) : (three ? 14 : n === 1 ? 22 : 18), bar.value === null ? palette.muted : color, 700, 'end') +
+      text(132, y, bar.text, size, bar.value === null ? palette.muted : color, 700, 'end') +
       `<rect x="12" y="${y + 6}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
       (fill > 0 ? `<rect x="12" y="${y + 6}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') + reset;
   }).join('');
 }
-function ring(view, palette) {
+function ring(view, palette, own) {
   const n = view.bars.length, single = n === 1, three = n === 3;
-  const xs = single ? [72] : three ? [26, 72, 118] : [42, 102], r = single ? 34 : three ? 16 : 22, cy = single ? 76 : three ? 66 : 70, stroke = single ? 9 : three ? 6 : 7;
-  const circumference = 2 * Math.PI * r;
+  const xs = single ? [72] : three ? [26, 72, 118] : [40, 104], r = single ? 32 : three ? 17 : 24;
+  const cy = single ? 72 : three ? 58 : 62, stroke = single ? 9 : three ? 6 : 7, circumference = 2 * Math.PI * r;
   return view.bars.map((bar, i) => {
     const color = toneColor(palette, bar.tone), x = xs[i], arc = (circumference * fraction(bar.value)).toFixed(1);
-    const size = single ? (bar.value === null ? 13 : 19) : three ? (bar.value === null ? 10 : 11) : (bar.value === null ? 10 : 14);
+    const size = bar.value === null ? (single ? 14 : three ? 10 : 12) : (single ? 22 : three ? 11 : 15);
+    // One ring has its window name beside the key title; several rings have theirs under each ring.
+    const name = single ? text(132, 21, caption(bar, n), 12, palette.muted, 400, 'end') : text(x, cy + r + (three ? 14 : 16), caption(bar, n), three ? 11 : 12, palette.muted);
     return `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${palette.track}" stroke-width="${stroke}"/>` +
       (bar.value ? `<circle cx="${x}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}" stroke-linecap="round" stroke-dasharray="${arc} ${circumference.toFixed(1)}" transform="rotate(-90 ${x} ${cy})"/>` : '') +
-      text(x, cy + (single ? 6 : 4), bar.text, size, bar.value === null ? palette.muted : color, 700) +
-      (single ? '' : text(x, cy + r + 15, caption(bar, n), three ? 10 : 11, palette.muted)) +
-      (view.caption || !bar.reset ? '' : text(x, 136, bar.reset, three ? 10 : 11, palette.muted));
+      text(x, cy + (single ? 7 : three ? 4 : 5), bar.text, size, bar.value === null ? palette.muted : color, 700) + name +
+      (own && bar.reset ? text(x, three ? 110 : 124, bar.reset, three ? 11 : 14, timeColor(palette, bar), 700) : '');
   }).join('');
 }
+const sharedReset = view => { const first = view.bars.length > 0 ? view.bars[0].reset : ''; return first && view.bars.every(b => b.reset === first) ? first : ''; };
 
 function renderKey(view, settings) {
   const palette = paletteFor(settings.palette);
   let body;
   if (view.kind === 'status') body = statusBody(view, palette);
   else if (view.kind !== 'usage') body = text(72, 86, view.message, view.message.length > 6 ? 14 : 18, view.kind === 'loading' ? palette.muted : palette.text, 700);
-  else body = (settings.style === 'ring' ? ring : settings.style === 'horizontal' ? horizontal : vertical)(view, palette) +
-    (view.caption ? text(72, 134, view.caption, 12, palette.muted) : '');
+  else {
+    // A caption (e.g. 保存された値) takes the bottom line instead of the reset time.
+    const shared = view.caption ? '' : sharedReset(view), own = !view.caption && !shared;
+    const time = view.bars.every(b => b.tone === 'muted') ? palette.muted : palette.text;
+    body = (settings.style === 'ring' ? ring : settings.style === 'horizontal' ? horizontal : vertical)(view, palette, own) +
+      (view.caption ? text(72, 134, view.caption, 12, palette.muted) : shared ? resetText(132, shared, 12, 18, time, palette.muted) : '');
+  }
   return '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">' +
     `<rect width="144" height="144" rx="18" fill="${palette.background}"/>` +
     text(12, 21, view.title, 15, palette.text, 700, 'start') + body + '</svg>';

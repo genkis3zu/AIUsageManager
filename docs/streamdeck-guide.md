@@ -8,16 +8,16 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
 
 | キー | 表示するもの |
 |---|---|
-| Claude 使用量 | 週（ProとMaxは5時間も） |
+| Claude 使用量 | 取得先が返す枠（例：Ultraは週とFable、Maxは5時間・週・Fable） |
 | Codex 使用量 | 週（Plusなどは5時間も） |
 | Grok 使用量 | 週 |
 | AIの状況 | AnthropicとOpenAIの障害情報と、週の使用枠のリセット（[下記](#aiの状況キー)） |
 
-週の枠が2つ以上あるとき（例：Claudeの週とFable）は、使用率が高いほうを1本だけ描きます。上限に先に届くのはそちらだからです。リセット時刻を過ぎた古い値より、現在の値を優先します。すべての枠は、トレイアプリの一覧で確認できます。
+1つのキーに描く枠は3つまでです。4つ目以降はキーに描きません（トレイアプリの一覧では確認できます）。
 
 使用量のキーは、次の設定を変えられます。
 
-- **表示スタイル**：リング／縦バー／横バー。横バーでは、リセットまでの時間を各バーの右下に大きめに表示します。
+- **表示スタイル**：リング／縦バー／横バー。リセットまでの時間は、キーの右下に大きめに1つだけ表示します。枠ごとにリセット時刻が違うとき（例：5時間と週）は、各枠の下に表示します。
 - **数値**：使用率（使った割合）／残り。
 - **リセットまでの時間**：表示する／しない。
 - **色**：緑・オレンジ・青・紫・ピンク・グレー。
@@ -80,7 +80,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.2.1-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.2.2-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。
