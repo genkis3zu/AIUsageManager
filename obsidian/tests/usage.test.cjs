@@ -92,8 +92,8 @@ test('waiting list is kept when valid; unknown apps, reasons and services are dr
   assert.deepEqual(w.unreadable,[{service:'Codex',reason:'記録を読めません'}]);
   const many=payload();many.waiting={items:Array.from({length:9},()=>item()),unreadable:[]};
   assert.equal(parseSnapshot(JSON.stringify(many)).waiting.items.length,8);
-  assert.deepEqual(parseSnapshot(JSON.stringify(payload())).waiting,{items:[],unreadable:[]});
-  for(const bad of ['x',[],null]){const q=payload();q.waiting=bad;assert.deepEqual(parseSnapshot(JSON.stringify(q)).waiting,{items:[],unreadable:[]});}
+  assert.equal(parseSnapshot(JSON.stringify(payload())).waiting,null,'a tray app that sends no list');
+  for(const bad of ['x',[],null]){const q=payload();q.waiting=bad;assert.equal(parseSnapshot(JSON.stringify(q)).waiting,null);}
 });
 module.exports={payload,now};
 

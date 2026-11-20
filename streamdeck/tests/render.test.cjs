@@ -254,10 +254,13 @@ test('waiting key shows the longest wait first', () => {
   for (const t of ['>対応待ち<', '>2<', '>Claude<', '>Fix login<', '>12分<']) assert.ok(svg.includes(t), t);
 });
 test('waiting key without waits says 対応待ちなし and counts finished', () => {
-  const v = waitingOf({ items: [waitItem('Claude', 3, 'finished')], unreadable: [{ service: 'Codex', reason: '記録を読めません' }] });
-  assert.deepEqual([v.count, v.top, v.finished, v.tone, v.unreadable], [0, null, 1, 'muted', ['Codex']]);
+  const v = waitingOf({ items: [waitItem('Claude', 3, 'finished')], unreadable: [] });
+  assert.deepEqual([v.count, v.top, v.finished, v.tone, v.unreadable], [0, null, 1, 'muted', []]);
   const svg = renderKey(v, { palette: 'green' });
   assert.ok(svg.includes('>対応待ちなし<') && svg.includes('>完了 1件<'));
+  const unread = renderKey(waitingOf({ items: [], unreadable: [{ service: 'Codex', reason: '記録を読めません' }] }), { palette: 'green' });
+  assert.ok(unread.includes('>確認できず<') && unread.includes('>Codex 読めません<') && !unread.includes('対応待ちなし'), 'never 対応待ちなし when a record could not be read');
+  assert.deepEqual([waitingView(connected({}), NOW)].map(x => [x.kind, x.message]), [['message', '未取得']], 'a tray app that sends no list');
   assert.ok(renderKey(waitingOf({ items: [], unreadable: [] }), { palette: 'green' }).includes('>対応待ちなし<'));
   assert.deepEqual([waitingView(initialConnection(), NOW)].map(x => [x.kind, x.message]), [['loading', '読み込み中']]);
   assert.deepEqual([waitingView(nextConnection(initialConnection(), { kind: 'absent' }), NOW)].map(x => [x.kind, x.message]), [['message', '未接続']]);

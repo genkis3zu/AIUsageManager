@@ -33,38 +33,71 @@ namespace AIUsageManager
             return new ClaudeSession { Pid = (int)pid.Value, SessionId = id, Status = status, WaitingFor = Json.Str(root, "waitingFor"), StatusUpdatedAt = at,
                 Cwd = Json.Str(root, "cwd"), Name = Json.Str(root, "name"), Entrypoint = Json.Str(root, "entrypoint") };
         }
-        // Sessions whose process is still running. `readable` is false when the folder is missing or cannot be listed.
-        public static ClaudeSession[] Read(string profile, Func<int, bool> isClaudeProcess, out bool readable)
+        sealed class Cached { public DateTime Written; public long Length; public ClaudeSession Session; }
+        static readonly object gate = new object();
+        static Dictionary<string, Cached> cache = new Dictionary<string, Cached>();
+        // Sessions whose process is still running. `readable` is false when a Claude folder exists but its sessions cannot be read;
+        // with no Claude folder at all, Claude Code is not used here and nothing is missing.
+        public static ClaudeSession[] Read(string profile, Func<IDictionary<int, DateTime>> claudeProcesses, out bool readable)
         {
             readable = false;
             var found = new List<ClaudeSession>();
-            var alive = isClaudeProcess ?? IsClaudeProcess;
             try
             {
-                var directory = new DirectoryInfo(Path.Combine(profile, ".claude", "sessions"));
-                if (!directory.Exists) return new ClaudeSession[0];
+                string home = Path.Combine(profile, ".claude");
+                var directory = new DirectoryInfo(Path.Combine(home, "sessions"));
+                if (!directory.Exists) { readable = !Directory.Exists(home); return new ClaudeSession[0]; }
                 var files = directory.EnumerateFiles("*.json").OrderByDescending(f => f.LastWriteTimeUtc).Take(MaxFiles).ToArray();
+                var processes = (claudeProcesses ?? ClaudeProcesses)();
                 readable = true;
+                var next = new Dictionary<string, Cached>();
                 foreach (var file in files)
                 {
-                    if (file.Length > MaxBytes) continue;
-                    ClaudeSession session;
-                    try { session = Parse(ReadOnlyFiles.Small(file.FullName)); }
+                    // Directory listings can hold old times and sizes; ask the file itself.
+                    try { file.Refresh(); if (!file.Exists || file.Length > MaxBytes) continue; }
                     catch (IOException) { continue; }
-                    catch (UnauthorizedAccessException) { continue; }
-                    if (session != null && alive(session.Pid)) found.Add(session);
+                    Cached hit;
+                    lock (gate) cache.TryGetValue(file.FullName, out hit);
+                    if (hit == null || hit.Written != file.LastWriteTimeUtc || hit.Length != file.Length)
+                    {
+                        try { hit = new Cached { Written = file.LastWriteTimeUtc, Length = file.Length, Session = Parse(ReadSmall(file.FullName)) }; }
+                        catch (IOException) { continue; }
+                        catch (UnauthorizedAccessException) { continue; }
+                    }
+                    next[file.FullName] = hit;
+                    DateTime started;
+                    // Windows reuses process ids: the process must have started before the session file was last written.
+                    if (hit.Session != null && processes.TryGetValue(hit.Session.Pid, out started) && started <= hit.Written.AddSeconds(5)) found.Add(hit.Session);
                 }
+                lock (gate) cache = next;
             }
             catch (IOException) { readable = false; }
             catch (UnauthorizedAccessException) { readable = false; }
             catch (SecurityException) { readable = false; }
             return found.ToArray();
         }
-        public static bool IsClaudeProcess(int pid)
+        static string ReadSmall(string path)
         {
-            try { using (var process = Process.GetProcessById(pid)) return string.Equals(process.ProcessName, "claude", StringComparison.OrdinalIgnoreCase); }
-            catch (ArgumentException) { return false; }
-            catch (InvalidOperationException) { return false; }
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (stream.Length > MaxBytes) return "";
+                var bytes = new byte[stream.Length]; int read = 0, count;
+                while (read < bytes.Length && (count = stream.Read(bytes, read, bytes.Length - read)) > 0) read += count;
+                return new UTF8Encoding(false).GetString(bytes, 0, read).TrimStart('﻿');
+            }
+        }
+        // Running Claude Code processes and their start times, listed once per read.
+        public static IDictionary<int, DateTime> ClaudeProcesses()
+        {
+            var result = new Dictionary<int, DateTime>();
+            foreach (var process in Process.GetProcessesByName("claude"))
+                using (process)
+                {
+                    try { result[process.Id] = process.StartTime.ToUniversalTime(); }
+                    catch (System.ComponentModel.Win32Exception) { }
+                    catch (InvalidOperationException) { }
+                }
+            return result;
         }
     }
     public enum CodexState { Unknown, Working, Question, Finished }
@@ -79,8 +112,9 @@ namespace AIUsageManager
     public static class CodexSessions
     {
         const int MaxLines = 2000, MaxFirstLine = 1048576;
+        sealed class Cached { public DateTime Written, Changed; public long Length; public CodexThread Thread; }
         static readonly object gate = new object();
-        static Dictionary<string, KeyValuePair<DateTime, CodexThread>> cache = new Dictionary<string, KeyValuePair<DateTime, CodexThread>>();
+        static Dictionary<string, Cached> cache = new Dictionary<string, Cached>();
         // The last thing that happened decides: a question not yet answered, a finished task, or a started task.
         public static CodexThread Classify(string firstLine, IEnumerable<string> linesNewestFirst)
         {
@@ -106,37 +140,44 @@ namespace AIUsageManager
                 { thread.State = CodexState.Question; thread.Since = at; return thread; }
                 if (type == "event_msg" && kind == "task_complete") { thread.State = CodexState.Finished; thread.Since = at; return thread; }
                 if (type == "event_msg" && kind == "task_started") { thread.State = CodexState.Working; thread.Since = at; return thread; }
+                // The user stopped the turn: an open question is no longer waiting, and nothing finished.
+                if (type == "event_msg" && kind == "turn_aborted") { thread.Since = at; return thread; }
             }
             return thread;
         }
         // Threads written in the last 12 hours, while a Codex app (ChatGPT/Codex or VS Code) runs.
+        // With no Codex folder at all, Codex is not used here; a Codex folder without sessions cannot be read.
         public static CodexThread[] Read(string profile, DateTimeOffset now, Func<bool> appRunning, out bool readable)
         {
             readable = false;
             try
             {
-                var directory = new DirectoryInfo(Path.Combine(profile, ".codex", "sessions"));
-                if (!directory.Exists) return new CodexThread[0];
+                string home = Path.Combine(profile, ".codex");
+                var directory = new DirectoryInfo(Path.Combine(home, "sessions"));
+                if (!directory.Exists) { readable = !Directory.Exists(home); return new CodexThread[0]; }
                 readable = true;
                 if (!(appRunning ?? AppRunning)()) return new CodexThread[0];
                 var oldest = now.UtcDateTime.AddHours(-12);
                 var result = new List<CodexThread>();
-                var next = new Dictionary<string, KeyValuePair<DateTime, CodexThread>>();
+                var next = new Dictionary<string, Cached>();
                 foreach (var file in directory.EnumerateFiles("*.jsonl", SearchOption.AllDirectories))
                 {
-                    var written = file.LastWriteTimeUtc;
-                    if (written < oldest) continue;
-                    KeyValuePair<DateTime, CodexThread> hit; CodexThread thread;
-                    lock (gate) if (!cache.TryGetValue(file.FullName, out hit) || hit.Key != written) hit = new KeyValuePair<DateTime, CodexThread>(written, null);
-                    thread = hit.Value;
-                    if (thread == null)
+                    // Codex keeps a thread's file open while it appends, so the directory listing can show an old time and size.
+                    try { file.Refresh(); if (!file.Exists) continue; }
+                    catch (IOException) { continue; }
+                    Cached hit;
+                    lock (gate) cache.TryGetValue(file.FullName, out hit);
+                    bool changed = hit == null || hit.Written != file.LastWriteTimeUtc || hit.Length != file.Length;
+                    var entry = changed ? new Cached { Written = file.LastWriteTimeUtc, Length = file.Length, Changed = hit == null ? file.LastWriteTimeUtc : now.UtcDateTime } : hit;
+                    next[file.FullName] = entry;
+                    if (entry.Changed < oldest) continue;
+                    if (entry.Thread == null)
                     {
-                        try { thread = Classify(FirstLine(file.FullName), ReadOnlyFiles.ReverseLines(file.FullName)); }
+                        try { entry.Thread = Classify(FirstLine(file.FullName), ReadOnlyFiles.ReverseLines(file.FullName)); }
                         catch (IOException) { continue; }
                         catch (UnauthorizedAccessException) { continue; }
                     }
-                    next[file.FullName] = new KeyValuePair<DateTime, CodexThread>(written, thread);
-                    result.Add(thread);
+                    result.Add(entry.Thread);
                 }
                 lock (gate) cache = next;
                 return result.ToArray();

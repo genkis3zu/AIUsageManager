@@ -54,10 +54,45 @@ internal static partial class Tests
             try
             {
                 bool ok;
-                var found = ClaudeSessions.Read(profile, pid => pid != 5, out ok);
+                var old = DateTime.UtcNow.AddHours(-1);
+                var found = ClaudeSessions.Read(profile, () => new Dictionary<int, DateTime> { { 1, old }, { 2, old }, { 3, old }, { 4, old }, { 6, old } }, out ok);
                 Assert(ok && found.Length == 1 && found[0].SessionId == "a");
-                ClaudeSessions.Read(Path.Combine(profile, "missing"), pid => true, out ok);
+            }
+            finally { Directory.Delete(profile, true); }
+        });
+        Check("No Claude folder means Claude is not used; a Claude folder without sessions cannot be read", () => {
+            bool ok;
+            string none = Profile("x.txt", "x"), claude = Profile(Path.Combine(".claude", "settings.json"), "{}");
+            try
+            {
+                Assert(ClaudeSessions.Read(none, () => new Dictionary<int, DateTime>(), out ok).Length == 0 && ok);
+                ClaudeSessions.Read(claude, () => new Dictionary<int, DateTime>(), out ok);
                 Assert(!ok);
+            }
+            finally { Directory.Delete(none, true); Directory.Delete(claude, true); }
+        });
+        Check("A reused process id does not bring back an old session", () => {
+            string file = Path.Combine(".claude", "sessions", "1.json");
+            string profile = Profile(file, J("{'pid':1,'sessionId':'a','status':'waiting','waitingFor':'input needed'}"));
+            try
+            {
+                var written = DateTime.UtcNow.AddHours(-1);
+                File.SetLastWriteTimeUtc(Path.Combine(profile, file), written);
+                bool ok;
+                Assert(ClaudeSessions.Read(profile, () => new Dictionary<int, DateTime> { { 1, DateTime.UtcNow } }, out ok).Length == 0);
+                Assert(ClaudeSessions.Read(profile, () => new Dictionary<int, DateTime> { { 1, written.AddHours(-1) } }, out ok).Length == 1);
+            }
+            finally { Directory.Delete(profile, true); }
+        });
+        Check("Claude processes are listed once per read", () => {
+            string dir = Path.Combine(".claude", "sessions");
+            string profile = Profile(Path.Combine(dir, "1.json"), J("{'pid':1,'sessionId':'a','status':'busy'}"), Path.Combine(dir, "2.json"), J("{'pid':2,'sessionId':'b','status':'busy'}"),
+                Path.Combine(dir, "3.json"), J("{'pid':3,'sessionId':'c','status':'busy'}"));
+            try
+            {
+                int calls = 0; bool ok; var old = DateTime.UtcNow.AddHours(-1);
+                var found = ClaudeSessions.Read(profile, () => { calls++; return new Dictionary<int, DateTime> { { 1, old }, { 2, old }, { 3, old } }; }, out ok);
+                Assert(found.Length == 3 && calls == 1);
             }
             finally { Directory.Delete(profile, true); }
         });
@@ -86,6 +121,25 @@ internal static partial class Tests
             Assert(Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_complete"), CodexEvent("05", "task_started")).State == CodexState.Working);
             Assert(Classify(CodexMeta("'vscode'")).State == CodexState.Unknown);
         });
+        Check("A Codex question the user stopped is no longer a question", () => {
+            var stopped = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"), CodexAsk("02", "c1"), CodexEvent("03", "turn_aborted"));
+            Assert(stopped.State != CodexState.Question && stopped.State != CodexState.Finished);
+        });
+        Check("A Codex record that grows without a new write time is read again", () => {
+            string file = Path.Combine(".codex", "sessions", "2026", "11", "20", "grow.jsonl");
+            string profile = Profile(file, CodexMeta("'vscode'") + "\n" + CodexEvent("01", "task_started") + "\n");
+            try
+            {
+                string path = Path.Combine(profile, file); bool ok;
+                var written = DateTime.UtcNow.AddMinutes(-1);
+                File.SetLastWriteTimeUtc(path, written);
+                Assert(CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => true, out ok)[0].State == CodexState.Working);
+                File.AppendAllText(path, CodexAsk("02", "c1") + "\n");
+                File.SetLastWriteTimeUtc(path, written);
+                Assert(CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => true, out ok)[0].State == CodexState.Question);
+            }
+            finally { Directory.Delete(profile, true); }
+        });
         Check("A cut-off last Codex line does not break classification", () => {
             var t = Classify(CodexMeta("'vscode'"), CodexEvent("04", "task_complete"), "{\"timestamp\":\"2026-");
             Assert(t.State == CodexState.Finished);
@@ -107,8 +161,10 @@ internal static partial class Tests
                 Assert(CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => false, out ok).Length == 0 && ok);
                 var threads = CodexSessions.Read(profile, DateTimeOffset.UtcNow, () => true, out ok);
                 Assert(ok && threads.Length == 1 && threads[0].State == CodexState.Working);
-                CodexSessions.Read(Path.Combine(profile, "missing"), DateTimeOffset.UtcNow, () => true, out ok);
-                Assert(!ok);
+                Assert(CodexSessions.Read(Path.Combine(profile, "missing"), DateTimeOffset.UtcNow, () => true, out ok).Length == 0 && ok);
+                string codexHome = Profile(Path.Combine(".codex", "config.toml"), "");
+                try { CodexSessions.Read(codexHome, DateTimeOffset.UtcNow, () => true, out ok); Assert(!ok); }
+                finally { Directory.Delete(codexHome, true); }
             }
             finally { Directory.Delete(profile, true); }
         });

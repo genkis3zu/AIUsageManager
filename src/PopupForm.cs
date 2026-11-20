@@ -187,6 +187,12 @@ namespace AIUsageManager
         }
         internal static string Elapsed(DateTimeOffset since,DateTimeOffset now)
         { int minutes=Math.Max(0,(int)Math.Floor((now-since).TotalMinutes));return minutes<60?minutes+"分":minutes/60+"時間"+minutes%60+"分"; }
+        // Never 「対応待ちなし」 unless every record was read.
+        internal static string WaitingHeading(WaitingList list)
+        {
+            int waits=list.Items.Count(i=>i.Reason!=WaitReason.Finished);
+            return waits>0?"対応待ち "+waits+"件":list.Unreadable.Length>0?"対応待ちを確認できません":"対応待ちなし";
+        }
         static string ReasonText(WaitReason reason) { return reason==WaitReason.Question?"質問":reason==WaitReason.Confirm?"確認":"完了"; }
         internal string WaitingText
         {
@@ -210,7 +216,7 @@ namespace AIUsageManager
             waitingTargets.Clear();
             if(WaitingHeight()==0)return;
             int waits=waiting.Items.Count(i=>i.Reason!=WaitReason.Finished);float y=66;
-            Artwork.Text(g,waits>0?"対応待ち "+waits+"件":"対応待ちなし",11,true,waits>0?palette.Warning:palette.Muted,new RectangleF(20,y,240,22),false);y+=26;
+            Artwork.Text(g,WaitingHeading(waiting),11,true,waits>0?palette.Warning:palette.Muted,new RectangleF(20,y,240,22),false);y+=26;
             foreach(var item in WaitingShown()) {
                 bool done=item.Reason==WaitReason.Finished;
                 Artwork.Text(g,item.Service,10,true,palette.Ink,new RectangleF(20,y,64,20),false);

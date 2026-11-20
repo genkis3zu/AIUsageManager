@@ -57,6 +57,7 @@ function waitingView(connection, now) {
   const base = { title: WAITING_TITLE, kind: 'message', message: '', caption: '', tone: 'muted', bars: [] };
   if (connection.status === 'loading') return { ...base, kind: 'loading', message: '読み込み中' };
   if (connection.status !== 'connected' || !connection.snapshot) return { ...base, message: '未接続' };
+  if (!connection.snapshot.waiting) return { ...base, message: '未取得' };
   const { items, unreadable } = connection.snapshot.waiting;
   const waits = items.filter(i => i.reason !== 'finished'), first = waits[0];
   const top = first ? { service: first.service, place: first.place, reason: REASON_WORDS[first.reason], minutes: Math.max(0, Math.floor((now - Date.parse(first.since)) / 60000)) } : null;
@@ -110,7 +111,8 @@ const minutesText = minutes => minutes < 60 ? minutes + '分' : Math.floor(minut
 function waitingBody(view, palette) {
   const color = toneColor(palette, view.tone);
   const note = view.unreadable.length ? text(72, 136, fitWidth(view.unreadable.join('・') + ' 読めません', 120 / 11), 11, palette.muted) : '';
-  if (!view.top) return text(72, 76, '対応待ちなし', 16, palette.text, 700) + (view.finished ? text(72, 102, '完了 ' + view.finished + '件', 13, palette.accent, 700) : '') + note;
+  // Never 対応待ちなし unless every record was read.
+  if (!view.top) return text(72, 76, view.unreadable.length ? '確認できず' : '対応待ちなし', 16, palette.text, 700) + (view.finished ? text(72, 102, '完了 ' + view.finished + '件', 13, palette.accent, 700) : '') + note;
   const time = minutesText(view.top.minutes), size = Math.max(14, Math.min(26, Math.floor(124 / widthEm(time))));
   return text(132, 22, String(view.count), 18, color, 700, 'end') +
     text(72, 56, fitWidth(view.top.service, 124 / 18), 18, palette.text, 700) +

@@ -236,6 +236,9 @@ internal static class UiTests
                 context=new TrayContext(false,waitingShow,new FakeSource(),new ThemeSettings(Path.Combine(waitingFixture,"settings.ini")),new FakeLogin(),null,text=>{},waitingSnapshots,null,null,waitingSource,text=>waitingNotices.Add(text));
                 Field<System.Windows.Forms.Timer>(context,"waitingTimer").Interval=50;
                 var waitingPopup=Field<PopupForm>(context,"popup");
+                var unreadable=new WaitingList{Unreadable=new[]{new WaitingUnreadable{Service="Codex",Reason="記録を読めません"}}};
+                var finishedOnly=new WaitingList{Items=new[]{new WaitingItem{Key="Claude/x",Service="Claude",Place="P",App="claude",Reason=WaitReason.Finished,Since=DateTimeOffset.Now}}};
+                Assert(PopupForm.WaitingHeading(unreadable)=="対応待ちを確認できません"&&PopupForm.WaitingHeading(finishedOnly)=="対応待ちなし","The tray never says 対応待ちなし when a record could not be read");
                 Assert(Pump(()=>waitingPopup.WaitingText.Contains("Claude")&&waitingPopup.WaitingText.Contains("質問")&&waitingPopup.WaitingText.Contains("4分")),"Waiting sessions are listed in the tray with their reason and time");
                 Assert(Pump(()=>{string latest=Field<string>(waitingSnapshots,"latest");return latest!=null&&latest.Contains("\"waiting\":{")&&latest.Contains("\"reason\":\"question\"");}),"The waiting list is shared with Stream Deck");
                 Assert(Pump(()=>waitingNotices.Count==1)&&waitingNotices[0].Contains("が質問の答えを4分待っています"),"A wait longer than 3 minutes is announced once");
