@@ -82,12 +82,12 @@ test('company lines of the AIの状況 status are validated one by one',()=> {
   assert.deepEqual(s.providers.map(x=>[x.company,x.tone,x.detail.length]),[['Claude','normal',0],['OpenAI','warning',180],['Y','unknown',0]]);
   p.status.providers='x';assert.deepEqual(parseSnapshot(JSON.stringify(p)).status.providers,[]);
 });
-test('waiting list is kept when valid; unknown apps, reasons and services are dropped',()=> {
+test('waiting list is kept when valid; unknown apps, reasons and services are dropped; an item with no app has no link',()=> {
   const item=(over={})=>({service:'Claude',place:'Fix login',reason:'question',since:new Date(now).toISOString(),app:'claude',...over});
   const p=payload();
-  p.waiting={items:[item(),item({app:'https'}),item({reason:'other'}),item({service:'X'}),item({since:'later'}),null,item({service:'Codex',app:'vscode',reason:'finished',place:'x'.repeat(60)})],unreadable:[{service:'Codex',reason:'記録を読めません'},{service:'X',reason:'y'}]};
+  p.waiting={items:[item(),item({app:'https'}),item({reason:'other'}),item({service:'X'}),item({since:'later'}),null,item({service:'Codex',app:'vscode',reason:'finished',place:'x'.repeat(60)}),item({app:null,place:'obsidian'}),item({app:undefined,place:'none'})],unreadable:[{service:'Codex',reason:'記録を読めません'},{service:'X',reason:'y'}]};
   const w=parseSnapshot(JSON.stringify(p)).waiting;
-  assert.deepEqual(w.items.map(i=>[i.service,i.reason,i.app]),[['Claude','question','claude'],['Codex','finished','vscode']]);
+  assert.deepEqual(w.items.map(i=>[i.service,i.reason,i.app]),[['Claude','question','claude'],['Codex','finished','vscode'],['Claude','question',null],['Claude','question',null]]);
   assert.equal(w.items[1].place.length,40);
   assert.deepEqual(w.unreadable,[{service:'Codex',reason:'記録を読めません'}]);
   const many=payload();many.waiting={items:Array.from({length:9},()=>item()),unreadable:[]};

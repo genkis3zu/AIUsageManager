@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security;
 using System.Text;
 
@@ -16,6 +17,8 @@ namespace AIUsageManager
         public string SessionId, Status, WaitingFor, Cwd, Name, Entrypoint;
         public int Pid;
         public DateTimeOffset? StatusUpdatedAt;
+        // Names of the processes above the session's process, nearest first (not from the file); null when not looked up.
+        public string[] Parents;
     }
     public static class ClaudeSessions
     {
@@ -38,7 +41,8 @@ namespace AIUsageManager
         static Dictionary<string, Cached> cache = new Dictionary<string, Cached>();
         // Sessions whose process is still running. `readable` is false when a Claude folder exists but its sessions cannot be read;
         // with no Claude folder at all, Claude Code is not used here and nothing is missing.
-        public static ClaudeSession[] Read(string profile, Func<IDictionary<int, DateTime>> claudeProcesses, out bool readable)
+        // `parentsOf` (process id, start time) gives the names of the processes above a session's process; without it Parents stays null.
+        public static ClaudeSession[] Read(string profile, Func<IDictionary<int, DateTime>> claudeProcesses, out bool readable, Func<int, DateTime, string[]> parentsOf = null)
         {
             readable = false;
             var found = new List<ClaudeSession>();
@@ -67,7 +71,8 @@ namespace AIUsageManager
                     next[file.FullName] = hit;
                     DateTime started;
                     // Windows reuses process ids: the process must have started before the session file was last written.
-                    if (hit.Session != null && processes.TryGetValue(hit.Session.Pid, out started) && started <= hit.Written.AddSeconds(5)) found.Add(hit.Session);
+                    if (hit.Session != null && processes.TryGetValue(hit.Session.Pid, out started) && started <= hit.Written.AddSeconds(5))
+                        found.Add(WithParents(hit.Session, parentsOf == null ? null : parentsOf(hit.Session.Pid, started)));
                 }
                 lock (gate) cache = next;
             }
@@ -75,6 +80,12 @@ namespace AIUsageManager
             catch (UnauthorizedAccessException) { readable = false; }
             catch (SecurityException) { readable = false; }
             return found.ToArray();
+        }
+        // A copy, so the cached session from the file is never changed.
+        static ClaudeSession WithParents(ClaudeSession s, string[] parents)
+        {
+            return new ClaudeSession { SessionId = s.SessionId, Status = s.Status, WaitingFor = s.WaitingFor, Cwd = s.Cwd, Name = s.Name, Entrypoint = s.Entrypoint,
+                Pid = s.Pid, StatusUpdatedAt = s.StatusUpdatedAt, Parents = parents };
         }
         static string ReadSmall(string path)
         {
@@ -99,6 +110,83 @@ namespace AIUsageManager
                 }
             return result;
         }
+    }
+    // A process and the process that started it, from one listing of all processes.
+    public sealed class ProcessEntry { public int Parent; public string Name; }
+    public static class ProcessTree
+    {
+        const int MaxParents = 8, MaxKnown = 200;
+        static readonly object gate = new object();
+        static readonly Dictionary<int, KeyValuePair<DateTime, string[]>> known = new Dictionary<int, KeyValuePair<DateTime, string[]>>();
+        // Names of the processes above `pid`, nearest first, at most 8. Windows reuses process ids, so the walk stops at a "parent"
+        // that started after the process below it: the real parent has ended. An unknown start time (no access) does not stop it.
+        public static string[] Parents(int pid, DateTime started, IDictionary<int, ProcessEntry> table, Func<int, DateTime?> startedOf)
+        {
+            var names = new List<string>(); var seen = new HashSet<int> { pid };
+            DateTime? below = started;
+            ProcessEntry entry, parent;
+            while (names.Count < MaxParents && table.TryGetValue(pid, out entry) && seen.Add(entry.Parent) && table.TryGetValue(entry.Parent, out parent))
+            {
+                var at = startedOf(entry.Parent);
+                if (at.HasValue && below.HasValue && at.Value > below.Value) break;
+                if (at.HasValue) below = at;
+                names.Add(parent.Name ?? "");
+                pid = entry.Parent;
+            }
+            return names.ToArray();
+        }
+        // For the waiting list: worked out once per Claude Code process (id and start time) and kept while it runs.
+        public static string[] Of(int pid, DateTime started)
+        {
+            KeyValuePair<DateTime, string[]> hit;
+            lock (gate) if (known.TryGetValue(pid, out hit) && hit.Key == started) return hit.Value;
+            var names = Parents(pid, started, List(), StartedAt);
+            lock (gate)
+            {
+                if (known.Count >= MaxKnown) known.Clear();
+                known[pid] = new KeyValuePair<DateTime, string[]>(started, names);
+            }
+            return names;
+        }
+        // Every running process with its parent and file name, from one Windows process listing.
+        public static IDictionary<int, ProcessEntry> List()
+        {
+            var result = new Dictionary<int, ProcessEntry>();
+            IntPtr snapshot = CreateToolhelp32Snapshot(SnapProcess, 0);
+            if (snapshot == InvalidHandle) return result;
+            try
+            {
+                var entry = new ProcessEntry32 { Size = (uint)Marshal.SizeOf(typeof(ProcessEntry32)) };
+                for (bool more = Process32First(snapshot, ref entry); more; more = Process32Next(snapshot, ref entry))
+                    result[(int)entry.ProcessId] = new ProcessEntry { Parent = (int)entry.ParentProcessId, Name = entry.ExeFile ?? "" };
+            }
+            finally { CloseHandle(snapshot); }
+            return result;
+        }
+        static DateTime? StartedAt(int pid)
+        {
+            try { using (var process = Process.GetProcessById(pid)) return process.StartTime.ToUniversalTime(); }
+            catch (ArgumentException) { return null; }
+            catch (InvalidOperationException) { return null; }
+            catch (NotSupportedException) { return null; }
+            catch (System.ComponentModel.Win32Exception) { return null; }
+        }
+        const uint SnapProcess = 2;
+        static readonly IntPtr InvalidHandle = new IntPtr(-1);
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct ProcessEntry32
+        {
+            public uint Size, Usage, ProcessId;
+            public IntPtr DefaultHeapId;
+            public uint ModuleId, Threads, ParentProcessId;
+            public int PriorityBase;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string ExeFile;
+        }
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint processId);
+        [DllImport("kernel32.dll", EntryPoint = "Process32FirstW", CharSet = CharSet.Unicode)] static extern bool Process32First(IntPtr snapshot, ref ProcessEntry32 entry);
+        [DllImport("kernel32.dll", EntryPoint = "Process32NextW", CharSet = CharSet.Unicode)] static extern bool Process32Next(IntPtr snapshot, ref ProcessEntry32 entry);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
     }
     public enum CodexState { Unknown, Working, Question, Finished }
     // One Codex thread (desktop app or VS Code), from its session record in ~/.codex/sessions.
@@ -240,7 +328,7 @@ namespace AIUsageManager
                 string key = "Claude/" + session.SessionId, state = session.Status == "waiting" ? "waiting" : session.Status == "busy" ? "busy" : session.Status == "idle" ? "idle" : "other";
                 present.Add(key);
                 var reason = state == "waiting" ? (session.WaitingFor == "input needed" ? WaitReason.Question : WaitReason.Confirm) : WaitReason.Finished;
-                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), WaitingNames.ClaudeApp(session.Entrypoint), reason, session.StatusUpdatedAt, now);
+                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), WaitingNames.ClaudeApp(session.Entrypoint, session.Parents), reason, session.StatusUpdatedAt, now);
             }
             foreach (var thread in codex ?? new CodexThread[0])
             {
@@ -327,7 +415,7 @@ namespace AIUsageManager
         public WaitingSnapshotInput Read(DateTimeOffset now)
         {
             bool claudeReadable, codexReadable;
-            var claude = ClaudeSessions.Read(profile, null, out claudeReadable);
+            var claude = ClaudeSessions.Read(profile, null, out claudeReadable, ProcessTree.Of);
             var codex = CodexSessions.Read(profile, now, null, out codexReadable);
             return new WaitingSnapshotInput { Claude = claude, ClaudeReadable = claudeReadable, Codex = codex, CodexReadable = codexReadable };
         }
@@ -384,7 +472,14 @@ namespace AIUsageManager
             int cut = char.IsHighSurrogate(result[39]) ? 39 : 40;
             return result.ToString(0, cut).TrimEnd();
         }
-        public static string ClaudeApp(string entrypoint)
-        { return entrypoint != null && entrypoint.IndexOf("vscode", StringComparison.OrdinalIgnoreCase) >= 0 ? "vscode" : "claude"; }
+        // The app a Claude Code session runs in: from how it was started, or else a VS Code window above it (Claude Code in VS Code's terminal).
+        // A session another program started (a program using the Claude Agent SDK, a terminal outside VS Code) has no app to open: null.
+        public static string ClaudeApp(string entrypoint, IEnumerable<string> parents)
+        {
+            if (entrypoint != null && entrypoint.IndexOf("vscode", StringComparison.OrdinalIgnoreCase) >= 0) return "vscode";
+            if (entrypoint != null && entrypoint.IndexOf("desktop", StringComparison.OrdinalIgnoreCase) >= 0) return "claude";
+            if (parents != null && parents.Any(n => string.Equals(n, "Code.exe", StringComparison.OrdinalIgnoreCase))) return "vscode";
+            return null;
+        }
     }
 }

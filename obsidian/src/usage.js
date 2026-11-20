@@ -22,13 +22,14 @@ function parseStatus(v) {
   if(!v || typeof v!=='object' || Array.isArray(v) || !STATUS_TONES.includes(v.tone)) return null;
   return {tone:v.tone,title:text(v.title,60),detail:text(v.detail),page:STATUS_PAGES.includes(v.page)?v.page:null,line:text(v.line),providers:parseProviders(v.providers)};
 }
-// The tray app's 対応待ち list: sessions waiting for the user. Only known services, reasons and the four app links pass.
+// The tray app's 対応待ち list: sessions waiting for the user. Only known services, reasons and the four app links pass;
+// an item with no app (a session another program started) stays, with no link.
 const WAIT_SERVICES = ['Claude', 'Codex', 'Grok Bot'], WAIT_REASONS = ['question', 'confirm', 'finished'], WAIT_APPS = ['claude', 'codex', 'vscode', 'grokbot'];
 function parseWaiting(v) {
   // null: not sent (an older tray app, or before its first read) — never the same as 'read, nothing waiting'.
   if(!v || typeof v!=='object' || Array.isArray(v)) return null;
-  const items=(Array.isArray(v.items)?v.items:[]).filter(i=>i && typeof i==='object' && WAIT_SERVICES.includes(i.service) && WAIT_REASONS.includes(i.reason) && WAIT_APPS.includes(i.app) && date(i.since)).slice(0,8)
-    .map(i=>({service:i.service,place:text(i.place,40),reason:i.reason,since:i.since,app:i.app}));
+  const items=(Array.isArray(v.items)?v.items:[]).filter(i=>i && typeof i==='object' && WAIT_SERVICES.includes(i.service) && WAIT_REASONS.includes(i.reason) && (i.app==null || WAIT_APPS.includes(i.app)) && date(i.since)).slice(0,8)
+    .map(i=>({service:i.service,place:text(i.place,40),reason:i.reason,since:i.since,app:i.app==null?null:i.app}));
   const unreadable=(Array.isArray(v.unreadable)?v.unreadable:[]).filter(u=>u && typeof u==='object' && WAIT_SERVICES.includes(u.service)).slice(0,3).map(u=>({service:u.service,reason:text(u.reason,40)}));
   return {items,unreadable};
 }

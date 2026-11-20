@@ -54,6 +54,7 @@ AIを何本も並行して動かしていると、どれかが利用者の返事
   - それ以外（`busy` など）は出さない。
 - 確認済み（2026-11-20）：デスクトップアプリで質問を出している間、`status` が `waiting`、`waitingFor` が `input needed` になり、答えると `busy` に戻った。
 - 未確認：操作の許可の画面を出している間の値（デスクトップアプリ・VS Code）。作るときに実機で確かめ、取れなければ文書に書く。VS Code の `entrypoint` の値も実機で確かめる。
+- 確認（2026-11-20）：`entrypoint` は、デスクトップアプリで `claude-desktop`、VS Code のターミナルで動かした Claude Code で `cli`、Claude Agent SDK を使う別のプログラムから動かしたもので `sdk-ts` だった。`cli` と `sdk-ts` は `entrypoint` だけでは開くアプリが決まらないため、起動元のプロセスをさかのぼって VS Code（`Code.exe`）を探す。見つからなければ、一覧には出すが何も開かない。VS Code の拡張機能の値と、操作の許可の画面の値は、まだ確認できていない。
 
 ### Codex（ChatGPT/Codexデスクトップアプリ・VS Code）
 
@@ -113,7 +114,7 @@ AIを何本も並行して動かしていると、どれかが利用者の返事
 
 ### アプリを開く
 
-- 各アプリが Windows に登録しているリンクで開く：Claude のデスクトップアプリは `claude://`、Codex のデスクトップアプリは `codex://`、VS Code は `vscode://`、Grok Bot は `grokbot://`（このPCで4つとも登録を確認済み）。どれを使うかは Claude Code の `entrypoint`、Codex の `originator`・`source` から決める。
+- 各アプリが Windows に登録しているリンクで開く：Claude のデスクトップアプリは `claude://`、Codex のデスクトップアプリは `codex://`、VS Code は `vscode://`、Grok Bot は `grokbot://`（このPCで4つとも登録を確認済み）。どれを使うかは Claude Code の `entrypoint`（決まらないときは起動元のプロセス）、Codex の `originator`・`source` から決める。
 - Windows は、裏で動いているプログラムが別のウィンドウを前に出すことを制限している。リンクで開くと、開かれたアプリ自身が前に出るので、この制限を避けられる。キー入力を送るような方法は使わない。
 - 開けるのはこの4つの決まったリンクだけ（Stream Deck のプラグインと共有データの読み取りで限る）。実際にリンクでアプリが前に出るかは作るときに確かめ、出ないものがあれば利用者に相談する。
 - 確認（2026-11-20）：`claude://` は Claude、`codex://` は ChatGPT（Codex）、`vscode://` は VS Code が前に出た（VS Code は起動していなければ起動する）。`grokbot://` と `grokbot://app` では Grok Bot は前に出なかった。Grok Bot を前に出す方法は、Grok Bot の計画で別に決める。

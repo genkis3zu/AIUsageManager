@@ -236,6 +236,13 @@ test('a waiting key never opens a link outside the four apps', async () => {
   await press(h, 'w1', 100);
   assert.deepEqual(h.opened(), []);
 });
+test('a waiting key opens nothing when the longest wait has no app to open', async () => {
+  const h = harness({ reads: [{ kind: 'ok', json: withWaiting({ items: [waitAt('Claude', 12, null), waitAt('Codex', 4, 'codex')], unreadable: [] }) }] });
+  await h.plugin.handle(appear('w1', ID + '.waiting'));
+  assert.ok(h.images('w1').at(-1).includes('>対応待ち<'));
+  await press(h, 'w1', 100);
+  assert.deepEqual(h.opened(), []); assert.deepEqual(h.launches, []);
+});
 test('a disconnected waiting key starts the tray app', async () => {
   const h = harness({ reads: [{ kind: 'absent' }] });
   await h.plugin.handle(appear('w1', ID + '.waiting'));

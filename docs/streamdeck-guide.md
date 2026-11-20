@@ -74,7 +74,7 @@ Claude Code（デスクトップアプリ・VS Code）とCodex（ChatGPT/Codex�
 | 確認できず・◯◯ 読めません | そのAIの記録を読めません。対応待ちがないとは言い切れない状態です |
 | 未取得 | トレイアプリがまだ一覧を送っていません（起動の直後、または対応待ちに対応していない古い版） |
 
-- キーを押すと、いちばん長く待たせているもののアプリ（Claude、ChatGPT/Codex、VS Code）を開きます。対応待ちがなく完了があるときは、いちばん新しい完了のアプリを開きます。
+- キーを押すと、いちばん長く待たせているもののアプリ（Claude、ChatGPT/Codex、VS Code）を開きます。対応待ちがなく完了があるときは、いちばん新しい完了のアプリを開きます。開くアプリが決まらないもの（ほかのプログラムが動かしているClaude Codeなど）が先頭のときは、何も開きません。
 - Codexの承認待ちとGrok Botは、今の版では表示されません。
 - このキーには設定画面がなく、長押しにも同じ動作をします。
 
@@ -99,7 +99,7 @@ Claude Code（デスクトップアプリ・VS Code）とCodex（ChatGPT/Codex�
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.3.0-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.3.1-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。

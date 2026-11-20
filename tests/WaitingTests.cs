@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using AIUsageManager;
@@ -107,8 +108,56 @@ internal static partial class Tests
             Assert(c.Length <= 40 && !c.Any(char.IsControl) && !c.Contains("  ") && c.StartsWith("ab c"));
             Assert(WaitingNames.Place("  Fix\u0007  login ", null) == "Fix login");
         });
-        Check("Claude sessions open the desktop app unless they run in VS Code", () => {
-            Assert(WaitingNames.ClaudeApp("claude-desktop") == "claude" && WaitingNames.ClaudeApp("claude-vscode") == "vscode" && WaitingNames.ClaudeApp(null) == "claude");
+        Check("Claude sessions open the app they run in, or nothing", () => {
+            Assert(WaitingNames.ClaudeApp("claude-desktop", null) == "claude" && WaitingNames.ClaudeApp("claude-vscode", null) == "vscode");
+            Assert(WaitingNames.ClaudeApp("cli", new[] { "pwsh.exe", "Code.exe", "Code.exe", "explorer.exe" }) == "vscode");
+            Assert(WaitingNames.ClaudeApp("cli", new[] { "pwsh.exe", "code.exe" }) == "vscode");
+            Assert(WaitingNames.ClaudeApp("sdk-ts", new[] { "Obsidian.exe", "Obsidian.exe", "explorer.exe" }) == null);
+            Assert(WaitingNames.ClaudeApp("cli", new[] { "pwsh.exe", "WindowsTerminal.exe" }) == null);
+            Assert(WaitingNames.ClaudeApp(null, null) == null && WaitingNames.ClaudeApp("cli", new string[0]) == null);
+        });
+        Check("Parent processes are followed until one started after the process below it", () => {
+            var t0 = new DateTime(2026, 11, 20, 1, 0, 0, DateTimeKind.Utc);
+            var table = new Dictionary<int, ProcessEntry> {
+                { 10, new ProcessEntry { Parent = 20, Name = "claude.exe" } }, { 20, new ProcessEntry { Parent = 30, Name = "pwsh.exe" } },
+                { 30, new ProcessEntry { Parent = 40, Name = "Code.exe" } }, { 40, new ProcessEntry { Parent = 99, Name = "explorer.exe" } } };
+            var starts = new Dictionary<int, DateTime> { { 20, t0.AddMinutes(-1) }, { 30, t0.AddMinutes(-2) }, { 40, t0.AddDays(-1) } };
+            Func<int, DateTime?> started = pid => { DateTime at; return starts.TryGetValue(pid, out at) ? at : (DateTime?)null; };
+            Assert(string.Join(",", ProcessTree.Parents(10, t0, table, started)) == "pwsh.exe,Code.exe,explorer.exe");
+            // Windows reuses process ids: a "parent" that started after the process below it is another process; the real one has ended.
+            starts[30] = t0.AddMinutes(5);
+            Assert(string.Join(",", ProcessTree.Parents(10, t0, table, started)) == "pwsh.exe");
+            // An unknown start time (no access) does not stop the walk.
+            starts.Remove(30);
+            Assert(string.Join(",", ProcessTree.Parents(10, t0, table, started)) == "pwsh.exe,Code.exe,explorer.exe");
+            Assert(ProcessTree.Parents(77, t0, table, started).Length == 0);
+            var loop = new Dictionary<int, ProcessEntry> { { 1, new ProcessEntry { Parent = 2, Name = "claude.exe" } }, { 2, new ProcessEntry { Parent = 3, Name = "a.exe" } }, { 3, new ProcessEntry { Parent = 2, Name = "b.exe" } } };
+            Assert(string.Join(",", ProcessTree.Parents(1, t0, loop, pid => null)) == "a.exe,b.exe");
+            var deep = Enumerable.Range(1, 20).ToDictionary(i => i, i => new ProcessEntry { Parent = i + 1, Name = "p" + i + ".exe" });
+            Assert(ProcessTree.Parents(1, t0, deep, pid => null).Length == 8);
+        });
+        Check("The process listing names this process and its parent", () => {
+            var table = ProcessTree.List();
+            int self = Process.GetCurrentProcess().Id;
+            Assert(table.ContainsKey(self) && table[self].Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) && table[self].Parent > 0 && table.ContainsKey(table[self].Parent));
+        });
+        Check("Claude sessions carry the names of their parent processes", () => {
+            string profile = Profile(Path.Combine(".claude", "sessions", "1.json"), J("{'pid':1,'sessionId':'a','status':'waiting','waitingFor':'input needed','entrypoint':'cli'}"));
+            try
+            {
+                bool ok; var old = DateTime.UtcNow.AddHours(-1); var asked = new List<string>();
+                var found = ClaudeSessions.Read(profile, () => new Dictionary<int, DateTime> { { 1, old } }, out ok, (pid, at) => { asked.Add(pid + "@" + (at == old)); return new[] { "pwsh.exe", "Code.exe" }; });
+                Assert(ok && found.Length == 1 && found[0].Parents.SequenceEqual(new[] { "pwsh.exe", "Code.exe" }) && asked.SequenceEqual(new[] { "1@True" }));
+                Assert(ClaudeSessions.Read(profile, () => new Dictionary<int, DateTime> { { 1, old } }, out ok)[0].Parents == null);
+            }
+            finally { Directory.Delete(profile, true); }
+        });
+        Check("A Claude session in a VS Code terminal opens VS Code; one started by another program opens nothing", () => {
+            var tracker = new WaitingTracker();
+            var terminal = ClaudeAt("a", "waiting", "input needed", T); terminal.Entrypoint = "cli"; terminal.Parents = new[] { "pwsh.exe", "Code.exe" };
+            var other = ClaudeAt("b", "waiting", "input needed", T.AddMinutes(1)); other.Entrypoint = "sdk-ts"; other.Parents = new[] { "Obsidian.exe" };
+            var list = tracker.Observe(new[] { terminal, other }, true, new CodexThread[0], true, T.AddMinutes(2));
+            Assert(list.Items.Length == 2 && list.Items[0].App == "vscode" && list.Items[1].App == null);
         });
          Check("A pending Codex question is a question; an answered one is not", () => {
             var asked = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"), CodexAsk("02", "c1"));

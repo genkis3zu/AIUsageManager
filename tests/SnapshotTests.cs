@@ -82,6 +82,8 @@ internal static partial class Tests
             Assert(json.Contains("\"waiting\":{")&&json.Contains("\"reason\":\"question\"")&&json.Contains("\"app\":\"claude\"")&&!json.Contains("\\u0007")&&json.Contains("\"unreadable\":[{\"service\":\"Codex\""));
             Assert(json.Split(new[]{"\"place\":"},StringSplitOptions.None).Length-1==8);
             Assert(!UsageSnapshot.Create(WidgetCards.Sample(T),T,false,null,null).Contains("\"waiting\""));
+            var noApp=new WaitingList{Items=new[]{new WaitingItem{Key="Claude/x",Service="Claude",Place="p",App=null,Reason=WaitReason.Question,Since=T}},Unreadable=new WaitingUnreadable[0]};
+            Assert(UsageSnapshot.Create(WidgetCards.Sample(T),T,false,null,noApp).Contains("\"app\":null"));
         });
         Check("Snapshot drops expired warning messages while retaining original usage",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[1].Percent=100;
