@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Linq;
@@ -171,16 +172,67 @@ namespace AIUsageManager
         // The line under the heading shows AIの状況 (outage, partial outage, recent reset or normal).
         public void SetStatus(StatusSummary value) { status=value;AccessibleDescription=value==null?null:value.Line;Invalidate(); }
         public void TickDisplay() { if(Visible){SetUsage(rows.Select(row=>row.Usage).ToArray());} }
+        // The waiting list under the heading: waits oldest first, then finished items; at most four lines and 「ほか N件」.
+        const int WaitingLines=4;
+        WaitingList waiting=new WaitingList();
+        DateTimeOffset waitingNow=DateTimeOffset.Now;
+        readonly List<KeyValuePair<RectangleF,string>> waitingTargets=new List<KeyValuePair<RectangleF,string>>();
+        public event Action<string> WaitingOpenRequested;
+        public void SetWaiting(WaitingList list,DateTimeOffset now) { waiting=list??new WaitingList();waitingNow=now;LayoutRows();Invalidate();if(Visible)ClampToScreen(); }
+        WaitingItem[] WaitingShown() { return waiting.Items.Take(WaitingLines).ToArray(); }
+        int WaitingHeight()
+        {
+            int lines=WaitingShown().Length+waiting.Unreadable.Length;
+            return lines==0?0:26+WaitingShown().Length*22+(waiting.Items.Length>WaitingLines?20:0)+waiting.Unreadable.Length*20+6;
+        }
+        internal static string Elapsed(DateTimeOffset since,DateTimeOffset now)
+        { int minutes=Math.Max(0,(int)Math.Floor((now-since).TotalMinutes));return minutes<60?minutes+"分":minutes/60+"時間"+minutes%60+"分"; }
+        static string ReasonText(WaitReason reason) { return reason==WaitReason.Question?"質問":reason==WaitReason.Confirm?"確認":"完了"; }
+        internal string WaitingText
+        {
+            get { return string.Join("\n",WaitingShown().Select(i=>i.Service+" "+(string.IsNullOrEmpty(i.Place)?"":i.Place+" ")+ReasonText(i.Reason)+" "+Elapsed(i.Since,waitingNow))
+                .Concat(waiting.Unreadable.Select(u=>u.Service+"の"+u.Reason))); }
+        }
+        string WaitingTarget(Point location)
+        {
+            var point=new PointF(location.X/scale,location.Y/scale);
+            foreach(var target in waitingTargets)if(target.Key.Contains(point))return target.Value;
+            return null;
+        }
+        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e);Cursor=WaitingTarget(e.Location)!=null?Cursors.Hand:Cursors.Default; }
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);string app=WaitingTarget(e.Location);
+            if(app!=null&&e.Button==MouseButtons.Left&&WaitingOpenRequested!=null)WaitingOpenRequested(app);
+        }
+        void PaintWaiting(Graphics g)
+        {
+            waitingTargets.Clear();
+            if(WaitingHeight()==0)return;
+            int waits=waiting.Items.Count(i=>i.Reason!=WaitReason.Finished);float y=66;
+            Artwork.Text(g,waits>0?"対応待ち "+waits+"件":"対応待ちなし",11,true,waits>0?palette.Warning:palette.Muted,new RectangleF(20,y,240,22),false);y+=26;
+            foreach(var item in WaitingShown()) {
+                bool done=item.Reason==WaitReason.Finished;
+                Artwork.Text(g,item.Service,10,true,palette.Ink,new RectangleF(20,y,64,20),false);
+                Artwork.Text(g,item.Place??"",10,false,palette.Muted,new RectangleF(86,y,190,20),false);
+                Artwork.Text(g,ReasonText(item.Reason),10,!done,done?palette.Muted:palette.Warning,new RectangleF(280,y,44,20),false);
+                Artwork.Text(g,Elapsed(item.Since,waitingNow),10,false,palette.Ink,new RectangleF(324,y,76,20),true);
+                if(AppLinks.For(item.App)!=null)waitingTargets.Add(new KeyValuePair<RectangleF,string>(new RectangleF(16,y-1,388,22),item.App));
+                y+=22;
+            }
+            if(waiting.Items.Length>WaitingLines){Artwork.Text(g,"ほか "+(waiting.Items.Length-WaitingLines)+"件",10,false,palette.Muted,new RectangleF(20,y,200,18),false);y+=20;}
+            foreach(var unreadable in waiting.Unreadable){Artwork.Text(g,unreadable.Service+"の"+unreadable.Reason,10,false,palette.Muted,new RectangleF(20,y,380,18),false);y+=20;}
+        }
         void LayoutRows() { LayoutRows(Screen.FromControl(this).WorkingArea); }
         void LayoutRows(Rectangle area)
         {
             var heights=rows.Select(row=>(string.IsNullOrEmpty(row.Usage.Status)?116:134)+UsageAlerts.ForDisplay(row.Usage,DateTimeOffset.Now).Sum(a=>UsageRow.AlertHeight(a)+6)).ToArray();
-            int total=heights.Sum(height=>P(height));
-            int available=Math.Max(P(80),area.Height-P(16)-P(112));
+            int total=heights.Sum(height=>P(height)),extra=P(WaitingHeight());
+            int available=Math.Max(P(80),area.Height-P(16)-P(112)-extra);
             int viewport=Math.Min(total,available),y=0,scroll=-content.AutoScrollPosition.Y;
             content.SuspendLayout();content.AutoScrollPosition=Point.Empty;
-            ClientSize=new Size(P(420),P(112)+viewport);
-            content.SetBounds(P(16),P(68),P(388),viewport);
+            ClientSize=new Size(P(420),P(112)+extra+viewport);
+            content.SetBounds(P(16),P(68)+extra,P(388),viewport);
             int rowWidth=P(388)-(total>viewport?SystemInformation.VerticalScrollBarWidth:0);
             for(int i=0;i<rows.Length;i++) { int height=P(heights[i]);rows[i].SetBounds(0,y,rowWidth,height);y+=height; }
             content.AutoScrollMinSize=new Size(0,total);content.ResumeLayout();
@@ -239,6 +291,7 @@ namespace AIUsageManager
             Artwork.Text(g,"使用量",18,true,palette.Ink,new RectangleF(20,16,150,28),false);
             Color statusInk=status==null?palette.Muted:status.Tone=="critical"?palette.Red:status.Tone=="warning"?palette.Warning:status.Tone=="reset"?palette.Blue:palette.Muted;
             Artwork.Text(g,status==null?"AI Usage Manager":status.Line,10,status!=null&&(status.Tone=="critical"||status.Tone=="warning"),statusInk,new RectangleF(20,44,276,18),false);
+            PaintWaiting(g);
             string footer=busy?"使用量を取得しています…":"5分ごとに自動更新";
             if(!busy&&nextRefresh.HasValue)footer+="  ·  次回 "+nextRefresh.Value.ToLocalTime().ToString("HH:mm");
             Artwork.Text(g,footer,10,false,palette.Muted,new RectangleF(20,ClientSize.Height/scale-35,380,26),false);

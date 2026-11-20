@@ -184,5 +184,9 @@ internal static partial class Tests
             }
             finally { File.Delete(path); }
         });
+        Check("Only the four app links can be opened", () => {
+            Assert(AppLinks.For("claude") == "claude://" && AppLinks.For("codex") == "codex://" && AppLinks.For("vscode") == "vscode://" && AppLinks.For("grokbot") == "grokbot://");
+            Assert(AppLinks.For("https") == null && AppLinks.For(null) == null && AppLinks.For("Claude") == null);
+        });
     }
 }

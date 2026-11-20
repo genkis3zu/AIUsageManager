@@ -13,6 +13,16 @@ using Microsoft.Win32;
 
 internal static class UiTests
 {
+    sealed class FakeWaiting : IWaitingSource
+    {
+        public volatile string Id="s1";
+        public DateTimeOffset Since=DateTimeOffset.Now.AddMinutes(-4);
+        public WaitingSnapshotInput Read(DateTimeOffset now)
+        {
+            var session=new ClaudeSession{Pid=1,SessionId=Id,Status="waiting",WaitingFor="input needed",StatusUpdatedAt=Since,Name="Fix login",Entrypoint="claude-desktop"};
+            return new WaitingSnapshotInput{Claude=new[]{session},ClaudeReadable=true,Codex=new CodexThread[0],CodexReadable=true};
+        }
+    }
     sealed class FakeSource : IUsageSource
     {
         public int Calls;
@@ -216,6 +226,24 @@ internal static class UiTests
                 codexEvent.Set();
                 Assert(Pump(()=>requested.Calls==2)&&requested.Service=="Codex","A login requested while the tray app runs goes to the requested service");
                 context.ExitThread();context=null;statusSnapshots.Dispose();
+            }
+            // Waiting list: a session waiting for an answer shows in the tray, goes to Stream Deck and is announced.
+            using(var waitingShow=new EventWaitHandle(false,EventResetMode.AutoReset))
+            {
+                string waitingFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(waitingFixture);
+                var waitingSnapshots=new SnapshotServer("AIUsageManager.UiTests.Waiting."+Guid.NewGuid().ToString("N"));
+                var waitingSource=new FakeWaiting();var waitingNotices=new List<string>();
+                context=new TrayContext(false,waitingShow,new FakeSource(),new ThemeSettings(Path.Combine(waitingFixture,"settings.ini")),new FakeLogin(),null,text=>{},waitingSnapshots,null,null,waitingSource,text=>waitingNotices.Add(text));
+                Field<System.Windows.Forms.Timer>(context,"waitingTimer").Interval=50;
+                var waitingPopup=Field<PopupForm>(context,"popup");
+                Assert(Pump(()=>waitingPopup.WaitingText.Contains("Claude")&&waitingPopup.WaitingText.Contains("質問")&&waitingPopup.WaitingText.Contains("4分")),"Waiting sessions are listed in the tray with their reason and time");
+                Assert(Pump(()=>{string latest=Field<string>(waitingSnapshots,"latest");return latest!=null&&latest.Contains("\"waiting\":{")&&latest.Contains("\"reason\":\"question\"");}),"The waiting list is shared with Stream Deck");
+                Assert(Pump(()=>waitingNotices.Count==1)&&waitingNotices[0].Contains("が質問の答えを4分待っています"),"A wait longer than 3 minutes is announced once");
+                Field<ToolStripMenuItem>(context,"waitingMenu").DropDownItems.Cast<ToolStripMenuItem>().First(i=>i.Text=="通知しない").PerformClick();
+                waitingSource.Since=DateTimeOffset.Now.AddMinutes(-20);waitingSource.Id="s2";
+                Assert(Pump(()=>waitingPopup.WaitingText.Contains("20分"))&&waitingNotices.Count==1,"Choosing 通知しない stops waiting notifications");
+                Assert(new ThemeSettings(Path.Combine(waitingFixture,"settings.ini")).LoadWaiting()==WaitingNoticeMode.Off,"The waiting notice choice is saved");
+                context.ExitThread();context=null;waitingSnapshots.Dispose();
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;
         }

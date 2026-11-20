@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -73,6 +74,14 @@ internal static partial class Tests
             Assert(!UsageSnapshot.Create(values,T,false).Contains("\"status\":{"));
             var two=StatusSummary.Create(new[]{new ProviderStatus{Company="Claude",Level=StatusLevel.Minor,Detail="Claude Code"},new ProviderStatus{Company="OpenAI",Level=StatusLevel.Unknown}},new ResetNotice[0],T);
             Assert(UsageSnapshot.Create(values,T,false,two).Contains("\"providers\":[{\"company\":\"Claude\",\"tone\":\"warning\",\"detail\":\"Claude Code\"},{\"company\":\"OpenAI\",\"tone\":\"unknown\",\"detail\":\"\"}]"));
+        });
+        Check("Snapshot carries the waiting list, cut to 8 items and cleaned",()=> {
+            var list=new WaitingList{Items=Enumerable.Range(0,10).Select(i=>new WaitingItem{Key="Claude/"+i,Service="Claude",Place="P\u0007"+i,App="claude",Reason=WaitReason.Question,Since=T}).ToArray(),
+                Unreadable=new[]{new WaitingUnreadable{Service="Codex",Reason="記録を読めません"}}};
+            string json=UsageSnapshot.Create(WidgetCards.Sample(T),T,false,null,list);
+            Assert(json.Contains("\"waiting\":{")&&json.Contains("\"reason\":\"question\"")&&json.Contains("\"app\":\"claude\"")&&!json.Contains("\\u0007")&&json.Contains("\"unreadable\":[{\"service\":\"Codex\""));
+            Assert(json.Split(new[]{"\"place\":"},StringSplitOptions.None).Length-1==8);
+            Assert(!UsageSnapshot.Create(WidgetCards.Sample(T),T,false,null,null).Contains("\"waiting\""));
         });
         Check("Snapshot drops expired warning messages while retaining original usage",()=> {
             var values=WidgetCards.Sample(T);values[0].Source="オンライン";values[0].Windows[1].Percent=100;

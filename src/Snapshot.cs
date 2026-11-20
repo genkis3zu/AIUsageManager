@@ -20,7 +20,9 @@ namespace AIUsageManager
         public static string Disconnected() { return "{\"schemaVersion\":2,\"connected\":false,\"services\":[]}"; }
         public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing) { return Create(values,now,refreshing,null); }
         // `status` (the AIの状況 line) is optional; readers that do not know it skip it.
-        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing,StatusSummary status)
+        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing,StatusSummary status) { return Create(values,now,refreshing,status,null); }
+        // `waiting` (the 対応待ち list) is optional like `status`; at most 8 items, names cleaned.
+        public static string Create(ServiceUsage[] values,DateTimeOffset now,bool refreshing,StatusSummary status,WaitingList waiting)
         {
             var services=new List<object>();
             foreach(string name in new[]{"Claude","Codex","Grok"}) {
@@ -37,6 +39,9 @@ namespace AIUsageManager
             var root=Map("schemaVersion",2,"connected",true,"generatedAt",Date(now),"refreshing",refreshing,"services",services);
             if(status!=null)root.Add("status",Map("tone",status.Tone,"title",status.Title,"detail",status.Detail,"page",status.Page,"line",status.Line,
                 "providers",status.Providers.Select(p=>Map("company",p.Company,"tone",StatusSummary.ToneOf(p.Level),"detail",p.Detail??"")).ToArray()));
+            if(waiting!=null)root.Add("waiting",Map("items",waiting.Items.Take(8).Select(i=>Map("service",i.Service,"place",WaitingNames.Clean(i.Place),
+                "reason",i.Reason==WaitReason.Question?"question":i.Reason==WaitReason.Confirm?"confirm":"finished","since",Date(i.Since),"app",i.App)).ToArray(),
+                "unreadable",waiting.Unreadable.Select(u=>Map("service",u.Service,"reason",u.Reason)).ToArray()));
             return new JavaScriptSerializer().Serialize(root);
         }
     }

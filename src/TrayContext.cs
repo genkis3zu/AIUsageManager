@@ -38,6 +38,17 @@ namespace AIUsageManager
         readonly Func<CancellationToken,Task<ProviderStatus[]>> statusPages;
         readonly ResetTracker resets=new ResetTracker();
         StatusSummary latestStatus;
+        // 対応待ち: Claude Code and Codex sessions waiting for the user, read every 5 seconds without changing any settings.
+        readonly IWaitingSource waitingSource;
+        readonly WaitingTracker waitingTracker=new WaitingTracker();
+        readonly WaitingReminders waitingReminders=new WaitingReminders();
+        readonly System.Windows.Forms.Timer waitingTimer=new System.Windows.Forms.Timer { Interval = 5000 };
+        readonly ToolStripMenuItem waitingMenu=new ToolStripMenuItem("対応待ちの通知");
+        readonly Action<string> waitingNotify;
+        WaitingList latestWaiting;
+        string waitingSignature="";
+        WaitingNoticeMode waitingMode;
+        bool readingWaiting;
         // Order matches the login signals Program passes in: Claude, Codex, Grok.
         static readonly string[] LoginServices = {"Claude","Codex","Grok"};
         readonly RegisteredWaitHandle[] loginWaits = new RegisteredWaitHandle[3];
@@ -53,13 +64,14 @@ namespace AIUsageManager
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
             : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
-        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null)
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null)
         {
+            this.waitingSource=waitingSource??(source==null?new LocalWaitingSource(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)):null);
             statusPages=statusSource??(source==null?(Func<CancellationToken,Task<ProviderStatus[]>>)(token=>StatusPages.FetchAsync(http,token)):null);
             snapshots=snapshotServer;
             alerts=new UsageAlerts(source==null?UsageForecaster.Default():new UsageForecaster());
             loginLauncher=launcher;
-            settings=themeSettings;themeMode=settings.Load();notificationMode=settings.LoadNotifications();
+            settings=themeSettings;themeMode=settings.Load();notificationMode=settings.LoadNotifications();waitingMode=settings.LoadWaiting();
             service = source ?? new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), http);
             showEvent=signal;
             // Create the native handle before scheduling messages onto the UI thread.
@@ -67,6 +79,7 @@ namespace AIUsageManager
             tray=new NotifyIcon { Icon=Artwork.TrayIcon(),Text="AI Usage Manager",Visible=true,ContextMenuStrip=menu };
             notify=notification??(text=>tray.ShowBalloonTip(8000,"AI 使用量の警告",text,ToolTipIcon.Warning));
             tray.BalloonTipClicked+=(s,e)=>ShowPopup();
+            waitingNotify=waitingNotification??(text=>tray.ShowBalloonTip(8000,"対応待ち",text,ToolTipIcon.Info));
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
             menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
             foreach(string name in LoginServices) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
@@ -79,6 +92,10 @@ namespace AIUsageManager
             AddNotificationChoice("90%・95%・100%のみ",NotificationMode.Thresholds);
             AddNotificationChoice("通知しない（画面には表示）",NotificationMode.Off);
             menu.Items.Add(notificationMenu);
+            AddWaitingChoice("3分後、その後10分ごと",WaitingNoticeMode.Standard);
+            AddWaitingChoice("1分後、その後5分ごと",WaitingNoticeMode.Frequent);
+            AddWaitingChoice("通知しない",WaitingNoticeMode.Off);
+            menu.Items.Add(waitingMenu);
             learningMenu.DropDownItems.Add("学習の状態",null,(s,e)=>MessageBox.Show(alerts.LearningStatus,"予測の学習",MessageBoxButtons.OK,MessageBoxIcon.Information));
             learningMenu.DropDownItems.Add("学習履歴を削除",null,(s,e)=> {
                 ClearLearningHistory(()=>MessageBox.Show("このアプリに保存した使用量の学習履歴を削除し、新しく学習します。各サービスのログやログイン情報は変更しません。","学習履歴を削除",MessageBoxButtons.YesNo,MessageBoxIcon.Question)==DialogResult.Yes);
@@ -101,6 +118,7 @@ namespace AIUsageManager
             };
             popup.RefreshRequested+=async(s,e)=>await RefreshUsage();
             popup.LoginRequested+=async name=>await Login(name);
+            popup.WaitingOpenRequested+=app=>AppLinks.Open(app);
             if(loginSignals!=null)for(int i=0;i<Math.Min(loginWaits.Length,loginSignals.Length);i++) {
                 string name=LoginServices[i];
                 loginWaits[i]=ThreadPool.RegisterWaitForSingleObject(loginSignals[i],(state,timedOut)=> {
@@ -115,6 +133,10 @@ namespace AIUsageManager
             if(refreshSignal!=null)refreshWait=ThreadPool.RegisterWaitForSingleObject(refreshSignal,(state,timedOut)=> {
                 try {if(!exiting)popup.BeginInvoke(new Action(async()=>await RefreshUsage()));}catch(InvalidOperationException){}
             },null,Timeout.Infinite,false);
+            if(this.waitingSource!=null) {
+                waitingTimer.Tick+=async(s,e)=>await ReadWaiting();waitingTimer.Start();
+                popup.BeginInvoke(new Action(async()=>await ReadWaiting()));
+            }
             popup.BeginInvoke(new Action(async()=> { if(show)ShowPopup();await RefreshUsage(); }));
         }
         void AddThemeChoice(string label,ThemeMode mode)
@@ -140,6 +162,36 @@ namespace AIUsageManager
             };
             notificationMenu.DropDownItems.Add(item);
         }
+        void AddWaitingChoice(string label,WaitingNoticeMode mode)
+        {
+            var item=new ToolStripMenuItem(label) { Tag=mode };
+            item.Click+=(s,e)=> {
+                waitingMode=mode;ApplyTheme();
+                if(!settings.SaveWaiting(mode))tray.ShowBalloonTip(4000,"通知の保存","設定を保存できませんでした。今回の起動中のみ適用します。",ToolTipIcon.Warning);
+            };
+            waitingMenu.DropDownItems.Add(item);
+        }
+        // Reads the waiting list off the UI thread, shows it, shares it when it changes, and announces long waits.
+        async Task ReadWaiting()
+        {
+            if(readingWaiting||exiting||waitingSource==null)return;
+            readingWaiting=true;
+            try
+            {
+                var input=await Task.Run(()=>waitingSource.Read(DateTimeOffset.Now));
+                if(exiting||input==null)return;
+                var now=DateTimeOffset.Now;
+                var list=waitingTracker.Observe(input.Claude,input.ClaudeReadable,input.Codex,input.CodexReadable,now);
+                latestWaiting=list;
+                string signature=string.Join("|",list.Items.Select(i=>i.Key+"/"+i.Reason+"/"+i.Since.ToUnixTimeSeconds()+"/"+i.Place).Concat(list.Unreadable.Select(u=>"!"+u.Service)));
+                bool changed=signature!=waitingSignature;waitingSignature=signature;
+                if(changed||popup.Visible)popup.SetWaiting(list,now);
+                if(changed)PublishSnapshot();
+                foreach(string text in waitingReminders.Due(list.Items,now,waitingMode))waitingNotify(text);
+            }
+            catch(Exception) { }
+            finally { readingWaiting=false; }
+        }
         void ApplyTheme()
         {
             if(exiting)return;
@@ -152,6 +204,8 @@ namespace AIUsageManager
             loginMenu.DropDown.Renderer=renderer;loginMenu.DropDown.BackColor=palette.Surface;loginMenu.DropDown.ForeColor=palette.Ink;
             notificationMenu.DropDown.Renderer=renderer;notificationMenu.DropDown.BackColor=palette.Surface;notificationMenu.DropDown.ForeColor=palette.Ink;
             learningMenu.DropDown.Renderer=renderer;learningMenu.DropDown.BackColor=palette.Surface;learningMenu.DropDown.ForeColor=palette.Ink;
+            waitingMenu.DropDown.Renderer=renderer;waitingMenu.DropDown.BackColor=palette.Surface;waitingMenu.DropDown.ForeColor=palette.Ink;
+            foreach(ToolStripMenuItem item in waitingMenu.DropDownItems)item.Checked=(WaitingNoticeMode)item.Tag==waitingMode;
             foreach(ToolStripMenuItem item in themeMenu.DropDownItems)item.Checked=(ThemeMode)item.Tag==themeMode;
             foreach(ToolStripMenuItem item in notificationMenu.DropDownItems)item.Checked=(NotificationMode)item.Tag==notificationMode;
             menu.Invalidate(true);themeMenu.DropDown.Invalidate(true);
@@ -226,16 +280,16 @@ namespace AIUsageManager
                 if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;learningMenu.Enabled=true;refreshTimer.Start();}
             }
         }
-        void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus)); }
+        void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus,latestWaiting)); }
         protected override void ExitThreadCore()
         {
             if(exiting)return;exiting=true;
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
-            refreshTimer.Stop();displayTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
+            refreshTimer.Stop();displayTimer.Stop();waitingTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
             if(refreshWait!=null)refreshWait.Unregister(null);
             foreach(var wait in loginWaits)if(wait!=null)wait.Unregister(null);
             tray.Visible=false;var icon=tray.Icon;tray.Dispose();icon.Dispose();menu.Dispose();popup.Dispose();
-            refreshTimer.Dispose();displayTimer.Dispose();http.Dispose();cancellation.Dispose();base.ExitThreadCore();
+            refreshTimer.Dispose();displayTimer.Dispose();waitingTimer.Dispose();http.Dispose();cancellation.Dispose();base.ExitThreadCore();
         }
     }
 }

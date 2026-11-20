@@ -270,6 +270,50 @@ namespace AIUsageManager
             return who + "が" + (item.Reason == WaitReason.Question ? "質問の答え" : "確認") + "を" + minutes + "分待っています";
         }
     }
+    public sealed class WaitingSnapshotInput
+    {
+        public ClaudeSession[] Claude = new ClaudeSession[0];
+        public bool ClaudeReadable;
+        public CodexThread[] Codex = new CodexThread[0];
+        public bool CodexReadable;
+    }
+    public interface IWaitingSource { WaitingSnapshotInput Read(DateTimeOffset now); }
+    // Reads this user's Claude Code and Codex records; never writes to them.
+    public sealed class LocalWaitingSource : IWaitingSource
+    {
+        readonly string profile;
+        public LocalWaitingSource(string profile) { this.profile = profile; }
+        public WaitingSnapshotInput Read(DateTimeOffset now)
+        {
+            bool claudeReadable, codexReadable;
+            var claude = ClaudeSessions.Read(profile, null, out claudeReadable);
+            var codex = CodexSessions.Read(profile, now, null, out codexReadable);
+            return new WaitingSnapshotInput { Claude = claude, ClaudeReadable = claudeReadable, Codex = codex, CodexReadable = codexReadable };
+        }
+    }
+    // Only these four fixed links can be opened from the waiting list; the opened app brings itself to the front.
+    public static class AppLinks
+    {
+        public static string For(string app)
+        {
+            switch (app)
+            {
+                case "claude": return "claude://";
+                case "codex": return "codex://";
+                case "vscode": return "vscode://";
+                case "grokbot": return "grokbot://";
+                default: return null;
+            }
+        }
+        public static bool Open(string app)
+        {
+            string link = For(app);
+            if (link == null) return false;
+            try { using (Process.Start(new ProcessStartInfo(link) { UseShellExecute = true })) { } return true; }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+            catch (InvalidOperationException) { return false; }
+        }
+    }
     public static class WaitingNames
     {
         // The session name first; otherwise the project folder (a Claude worktree …\<project>\.claude\worktrees\<x> shows <project>).
