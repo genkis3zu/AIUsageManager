@@ -126,18 +126,22 @@ function vertical(view, palette, own) {
       (own && bar.reset ? text(x, 128, bar.reset, three ? 11 : 14, timeColor(palette, bar), 700) : '');
   }).join('');
 }
+// Sizes follow the number of bars: one thick bar with a large number, two medium bars, three thin ones.
+const ROW_SIZES = { 1: { label: 14, percent: 28, missing: 16, bar: 20 }, 2: { label: 13, percent: 20, missing: 14, bar: 12 }, 3: { label: 12, percent: 15, missing: 12, bar: 8 } };
 function horizontal(view, palette, own) {
-  const n = view.bars.length, three = n === 3;
-  const rows = n === 1 ? [66] : n === 2 ? (own ? [42, 92] : [44, 86]) : (own ? [34, 68, 102] : [34, 64, 94]);
+  const n = view.bars.length, three = n === 3, size = ROW_SIZES[n] || ROW_SIZES[3];
+  const rows = n === 1 ? [62] : n === 2 ? (own ? [40, 92] : [44, 90]) : (own ? [38, 74, 110] : [36, 66, 96]);
   return view.bars.map((bar, i) => {
-    const color = toneColor(palette, bar.tone), y = rows[i], width = 120, fill = Math.round(width * fraction(bar.value));
-    const h = three ? 7 : n === 1 ? 10 : 9, size = bar.value === null ? (three ? 11 : 13) : (three ? 14 : n === 1 ? 22 : 18);
-    const reset = !own || !bar.reset ? '' : three ? text(132, y + 23, bar.reset, 10, palette.muted, 400, 'end') :
-      resetText(y + 28, bar.reset, 12, 15, timeColor(palette, bar), palette.muted);
-    return text(12, y, caption(bar, n), three ? 11 : 13, palette.muted, 400, 'start') +
-      text(132, y, bar.text, size, bar.value === null ? palette.muted : color, 700, 'end') +
-      `<rect x="12" y="${y + 6}" width="${width}" height="${h}" rx="3" fill="${palette.track}"/>` +
-      (fill > 0 ? `<rect x="12" y="${y + 6}" width="${fill}" height="${h}" rx="3" fill="${color}"/>` : '') + reset;
+    const color = toneColor(palette, bar.tone), y = rows[i], top = y + (n === 1 ? 8 : 5), width = 120, fill = Math.round(width * fraction(bar.value));
+    // Three bars have no room for a line under each bar, so each bar's own time follows its name.
+    const nameLine = three && own && bar.reset ?
+      `<text x="12" y="${y}" font-family="${FONT}" text-anchor="start"><tspan font-size="${size.label}" fill="${palette.muted}">${esc(caption(bar, n))}</tspan>` +
+      `<tspan dx="5" font-size="11" font-weight="700" fill="${timeColor(palette, bar)}">${esc(bar.reset)}</tspan></text>` : text(12, y, caption(bar, n), size.label, palette.muted, 400, 'start');
+    const reset = !own || !bar.reset || three ? '' : resetText(y + 30, bar.reset, 12, 15, timeColor(palette, bar), palette.muted);
+    return nameLine +
+      text(132, y, bar.text, bar.value === null ? size.missing : size.percent, bar.value === null ? palette.muted : color, 700, 'end') +
+      `<rect x="12" y="${top}" width="${width}" height="${size.bar}" rx="${Math.min(5, size.bar / 2)}" fill="${palette.track}"/>` +
+      (fill > 0 ? `<rect x="12" y="${top}" width="${fill}" height="${size.bar}" rx="${Math.min(5, size.bar / 2)}" fill="${color}"/>` : '') + reset;
   }).join('');
 }
 function ring(view, palette, own) {

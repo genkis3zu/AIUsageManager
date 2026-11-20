@@ -17,7 +17,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
 
 使用量のキーは、次の設定を変えられます。
 
-- **表示スタイル**：リング／縦バー／横バー。リセットまでの時間は、キーの右下に大きめに1つだけ表示します。枠ごとにリセット時刻が違うとき（例：5時間と週）は、各枠の下に表示します。
+- **表示スタイル**：リング／縦バー／横バー。リセットまでの時間は、キーの右下に大きめに1つだけ表示します。枠ごとにリセット時刻が違うとき（例：5時間と週）は、各枠の下（横バーで3本のときは枠の名前の横）に表示します。横バーは、本数が少ないほど太く、数字を大きく描きます。
 - **数値**：使用率（使った割合）／残り。
 - **リセットまでの時間**：表示する／しない。
 - **色**：緑・オレンジ・青・紫・ピンク・グレー。
@@ -80,7 +80,7 @@ Stream Deckのキーに、Claude・Codex・Grokの使用量と、AnthropicとOpe
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.2.2-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.2.3-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。

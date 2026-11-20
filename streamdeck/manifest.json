@@ -1,6 +1,6 @@
 {
   "Name": "AI Usage Manager",
-  "Version": "1.2.2.0",
+  "Version": "1.2.3.0",
   "Author": "AI Usage Manager contributors",
   "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量と、AnthropicとOpenAIの障害情報を表示します。このプラグイン自身はインターネットに接続しません。",
   "URL": "https://github.com/genkis3zu/AIUsageManager",

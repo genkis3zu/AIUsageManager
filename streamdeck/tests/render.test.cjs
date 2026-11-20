@@ -75,12 +75,27 @@ test('when bars reset at different times, each bar shows its own time', () => {
     assert.ok(!svg.includes('y="132"'), style);
     if (style === 'horizontal') {
       const ys = [...svg.matchAll(/<text x="132" y="(\d+)" [^>]*text-anchor="end"><tspan font-size="12" fill="[^"]+">リセット <\/tspan><tspan font-size="15" font-weight="700" fill="[^"]+">(3h0m|1日23h)<\/tspan>/g)].map(m => [Number(m[1]), m[2]]);
-      assert.deepEqual(ys, [[70, '3h0m'], [120, '1日23h']]);
+      assert.deepEqual(ys, [[70, '3h0m'], [122, '1日23h']]);
     } else {
       for (const time of ['3h0m', '1日23h']) assert.match(svg, new RegExp(`font-size="14" font-weight="700" fill="[^"]+" text-anchor="middle">${time}<`), style + ' ' + time);
     }
   }
   assert.ok(!renderKey(view('Codex', {}, { showReset: false }), { ...defaultSettings('Codex'), style: 'horizontal', showReset: false }).includes('リセット'));
+});
+test('horizontal bars get thinner and their numbers smaller as there are more of them', () => {
+  const measure = v => {
+    const svg = renderKey(v, { ...defaultSettings(v.title), style: 'horizontal' });
+    return [[...svg.matchAll(/<rect x="12" y="\d+" width="120" height="(\d+)"/g)].map(m => Number(m[1])),
+      [...svg.matchAll(/font-size="(\d+)" font-weight="700" fill="[^"]+" text-anchor="end">\d+%</g)].map(m => Number(m[1]))];
+  };
+  assert.deepEqual(measure(view('Codex')), [[20], [28]]);
+  assert.deepEqual(measure(view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] })), [[12, 12], [20, 20]]);
+  assert.deepEqual(measure(view('Claude', { claudeWindows: [['5時間', 10], ['週', 20], ['週（Fable）', 86]] })), [[8, 8, 8], [15, 15, 15]]);
+});
+test('three horizontal bars with different reset times show each time on the name line', () => {
+  const svg = renderKey(view('Claude', { claudeWindows: [['5時間', 10, SOON], ['週', 20], ['週（Fable）', 86]] }), { ...defaultSettings('Claude'), style: 'horizontal' });
+  const lines = [...svg.matchAll(/<text x="12" y="(\d+)" [^>]*><tspan [^>]*>([^<]+)<\/tspan><tspan [^>]*>([^<]+)<\/tspan><\/text>/g)].map(m => [m[2], m[3]]);
+  assert.deepEqual(lines, [['5h', '3h0m'], ['週', '1日23h'], ['Fable', '1日23h']]);
 });
 test('keys with one or two bars use text of at least 12 px in every style', () => {
   for (const v of [view('Codex'), view('Codex', { codex: null }), view('Claude', { claudeWindows: [['週', 87], ['週（Fable）', 95]] }), view('Claude', { claudeResets: [SOON, LATER_RESET] })])

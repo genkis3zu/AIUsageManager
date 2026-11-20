@@ -16,7 +16,7 @@ test('build writes exactly the plugin files', () => {
 });
 test('manifest has the plugin identity, Node 24, three usage keys and the AIの状況 key', () => {
   const m = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
-  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.2.2.0');
+  assert.equal(m.UUID, 'io.github.genkis3zu.aiusagemanager'); assert.equal(m.Name, 'AI Usage Manager'); assert.equal(m.Version, '1.2.3.0');
   assert.equal(m.CodePath, 'bin/plugin.cjs'); assert.deepEqual(m.Nodejs, { Version: '24' }); assert.equal(m.SDKVersion, 2);
   assert.equal(m.Software.MinimumVersion, '7.6'); assert.deepEqual(m.OS, [{ Platform: 'windows', MinimumVersion: '10' }]);
   assert.equal(m.Icon, 'imgs/plugin'); assert.equal(m.CategoryIcon, 'imgs/category'); assert.equal(m.Category, 'AI Usage Manager');
