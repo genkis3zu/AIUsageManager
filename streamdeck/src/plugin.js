@@ -9,13 +9,16 @@ const { parseArgs, StreamDeck } = require('./streamdeck');
 
 // After a launch the tray app needs a moment to open its pipe and publish its first values.
 const POLL_MS = 5000, LONG_PRESS_MS = 500, RELAUNCH_POLLS_MS = [2000, 5000, 10000], NOTICE_MS = 5000;
+// The tray app is started by the plugin only right after Stream Deck starts (usually at sign-in).
+const START_WINDOW_MS = 60000;
 const SETTING_KEYS = ['style', 'metric', 'showReset', 'palette'];
 const STATUS_SETTINGS = { palette: 'green' };
 
 // Shows the tray app's shared values on the keys. It never queries an AI service itself.
 function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchApp, now = Date.now, timers }) {
   const keys = new Map();
-  let connection = initialConnection(), interval = null, pending = null, manualPath = '', starting = false;
+  let connection = initialConnection(), interval = null, pending = null, manualPath = '', starting = false, startChecked = false, startRun = 0;
+  const startedAt = now();
   const message = (key, text) => ({ title: key.title, kind: 'message', message: text, caption: '', tone: 'muted', bars: [] });
   const background = promise => { promise.catch(() => {}); };
 
@@ -42,6 +45,13 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
       if (connection.status === 'connected') starting = false;
       pending = null;
       renderAll();
+      // When Stream Deck starts (usually at sign-in) without the tray app, start it once in the background.
+      // Polling begins when a key first appears, so a key shown later (another page, a folder) does not start it:
+      // the user may have closed the tray app on purpose. A key press still starts it.
+      if (!startChecked && connection.status !== 'loading') {
+        startChecked = true;
+        if (connection.status === 'disconnected' && now() - startedAt <= START_WINDOW_MS) await startTray([location.BACKGROUND_START], null);
+      }
     })();
     return pending;
   }
@@ -55,23 +65,28 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     timers.setTimeout(() => { const current = keys.get(context); if (current) { current.notice = null; render(context); } }, NOTICE_MS);
   }
 
+  // Starts the tray app and looks for it again after 2, 5 and 10 s. For a press (`context`), a missing or failed
+  // start is shown on that key; the start when Stream Deck starts stays quiet and leaves 未接続.
+  async function startTray(args, context) {
+    const file = resolveAppPath(manualPath);
+    if (!file) { if (context) showNotice(context); return; }
+    starting = true;
+    const run = ++startRun;
+    renderAll();
+    try { await launchApp(file, args); } catch { if (run === startRun) { starting = false; renderAll(); } if (context) showNotice(context); return; }
+    // Only the latest start may end 起動中: a timer left from an earlier start must not cut a later one short.
+    RELAUNCH_POLLS_MS.forEach((ms, i) => timers.setTimeout(() => {
+      background(poll().then(() => {
+        if (i === RELAUNCH_POLLS_MS.length - 1 && starting && run === startRun) { starting = false; renderAll(); }
+      }));
+    }, ms));
+  }
+
   async function press(context, long) {
     const key = keys.get(context);
     // While the tray app is starting, presses are ignored so a second press does not start it again.
     if (!key || starting) return;
-    if (connection.status === 'disconnected') {
-      const file = resolveAppPath(manualPath);
-      if (!file) { showNotice(context); return; }
-      starting = true;
-      renderAll();
-      try { await launchApp(file); } catch { starting = false; renderAll(); showNotice(context); return; }
-      RELAUNCH_POLLS_MS.forEach((ms, i) => timers.setTimeout(() => {
-        background(poll().then(() => {
-          if (i === RELAUNCH_POLLS_MS.length - 1 && starting) { starting = false; renderAll(); }
-        }));
-      }, ms));
-      return;
-    }
+    if (connection.status === 'disconnected') { await startTray([], context); return; }
     // The AIの状況 key opens the status page of the company with the problem; only the two fixed pages can open.
     // The 対応待ち key opens the app of the longest wait (or the newest finished item); only the four fixed links can open.
     if (key.waiting) {

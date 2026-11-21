@@ -33,6 +33,15 @@ internal static class UiTests
         { pending.SetResult(new[]{ServiceUsage.Empty("Claude",""),ServiceUsage.Empty("Codex",""),ServiceUsage.Empty("Grok","")}); }
         public void Complete(ServiceUsage[] values) { pending.SetResult(values); }
     }
+    sealed class FakeStartup : IStartupStore
+    {
+        public string Value; public bool Fail;
+        public string Read() { return Value; }
+        public bool Write(string command) { if(Fail)return false;Value=command;return true; }
+        public bool Delete() { if(Fail)return false;Value=null;return true; }
+        public bool IsDisabled() { return false; }
+        public bool ClearDisabled() { return !Fail; }
+    }
     sealed class FakeLogin : ILoginLauncher
     {
         public int Calls;
@@ -101,6 +110,7 @@ internal static class UiTests
                 var claudeNeeds=ServiceUsage.Empty("Claude","Claude Code で再ログインが必要です");claudeNeeds.NeedsLogin=true;
                 Assert(UsageRow.ShowsLogin(claudeNeeds)&&UsageRow.ShowsLogin(authMissing)&&!UsageRow.ShowsLogin(ServiceUsage.Empty("Claude","")),"Login button appears for Claude, Codex and Grok when login is needed");
                 Assert(Program.LoginService(new[]{"--login-claude"})=="Claude"&&Program.LoginService(new[]{"--login-codex"})=="Codex"&&Program.LoginService(new[]{"--login-grok"})=="Grok"&&Program.LoginService(new[]{"--login-other"})==null&&Program.LoginService(new[]{"--login-claude","x"})==null,"Start arguments request login only for the three known services");
+                Assert(Program.ShowsRunningApp(new string[0])&&Program.ShowsRunningApp(new[]{"--show"})&&!Program.ShowsRunningApp(new[]{"--background"})&&!Program.ShowsRunningApp(new[]{"--refresh"})&&!Program.ShowsRunningApp(new[]{"--login-codex"}),"A second start opens the running app's window, but not a start in the background");
                 var three=new ServiceUsage{Name="Claude",Plan="Max",Source="オンライン",RecordedAt=DateTimeOffset.Now};
                 three.Windows.Add(UsageWindow.FiveHour(10,DateTimeOffset.Now.AddHours(3)));three.Windows.Add(UsageWindow.Week(20,DateTimeOffset.Now.AddDays(3)));three.Windows.Add(UsageWindow.Scoped("Fable",96,DateTimeOffset.Now.AddDays(3)));
                 var paintRow=new UsageRow{Width=388,Height=110};paintRow.Usage=three;
@@ -247,6 +257,25 @@ internal static class UiTests
                 Assert(Pump(()=>waitingPopup.WaitingText.Contains("20分"))&&waitingNotices.Count==1,"Choosing 通知しない stops waiting notifications");
                 Assert(new ThemeSettings(Path.Combine(waitingFixture,"settings.ini")).LoadWaiting()==WaitingNoticeMode.Off,"The waiting notice choice is saved");
                 context.ExitThread();context=null;waitingSnapshots.Dispose();
+            }
+            // Starting at sign-in: the tray menu shows and changes the entry, which starts this app in the background.
+            using(var startupShow=new EventWaitHandle(false,EventResetMode.AutoReset))
+            {
+                string startupFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(startupFixture);
+                var startup=new FakeStartup();
+                context=new TrayContext(false,startupShow,new FakeSource(),new ThemeSettings(Path.Combine(startupFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,null,null,null,startup);
+                var startupItem=Field<ToolStripMenuItem>(context,"startupMenu");
+                Assert(startupItem.Text=="Windowsのサインイン時に起動"&&!startupItem.Checked&&Field<ContextMenuStrip>(context,"menu").Items.Contains(startupItem),"The tray menu offers starting at sign-in, off at first");
+                startupItem.PerformClick();
+                Assert(startupItem.Checked&&startup.Value==StartAtSignIn.Command(Application.ExecutablePath),"Turning it on adds an entry that starts this app in the background");
+                startupItem.PerformClick();
+                Assert(!startupItem.Checked&&startup.Value==null,"Turning it off removes the entry");
+                startup.Value=StartAtSignIn.Command(Application.ExecutablePath);
+                typeof(ToolStripDropDown).GetMethod("OnOpening",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(Field<ContextMenuStrip>(context,"menu"),new object[]{new System.ComponentModel.CancelEventArgs()});
+                Assert(startupItem.Checked,"The menu shows an entry added outside the app when it opens");
+                startup.Fail=true;startupItem.PerformClick();
+                Assert(startupItem.Checked&&startup.Value==StartAtSignIn.Command(Application.ExecutablePath),"A change that cannot be saved leaves the shown state as it is");
+                context.ExitThread();context=null;
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;
         }

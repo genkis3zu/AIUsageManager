@@ -6,7 +6,7 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 
 | ファイル | 責務 |
 |---|---|
-| `Program.cs` | 起動、同一ユーザー内の単一起動と表示シグナル |
+| `Program.cs` | 起動、同一ユーザー内の単一起動と表示シグナル（`--background` の2つ目の起動は表示しない） |
 | `TrayContext.cs` | 常駐、5分更新、テーマ・通知選択、Windows通知、終了時の解放 |
 | `Alerts.cs` | 閾値・急増・到達予測の通知判定、短期観測と通知抑止 |
 | `Forecast.cs` | 最近・長期・曜日時間帯のモデル、過去時点での検証、誤差による比重調整 |
@@ -14,8 +14,9 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Pace.cs` | 学習状態、90%・95%の予測幅、100%の目安と観測根拠 |
 | `Snapshot.cs` | Obsidian・Stream Deck向け表示データ、現在ユーザー限定の名前付きパイプ、時間・出力量の上限 |
 | `AppLocation.cs` | Stream Deckプラグインがトレイ版を起動するための、実行ファイルの場所の記録 |
+| `Startup.cs` | Windowsのサインイン時の起動（現在のユーザーのRunキーの値）の確認・登録・削除 |
 | `obsidian/src/` | 固定ツールバー、表示サイズ、鮮度判定、常駐アプリとの連携 |
-| `streamdeck/src/` | Stream Deckのキー表示、名前付きパイプの読み取り、未接続時のトレイ版の起動。鮮度判定は `obsidian/src/usage.js` を共用 |
+| `streamdeck/src/` | Stream Deckのキー表示、名前付きパイプの読み取り、Stream Deckの起動時と未接続のキーを押したときのトレイ版の起動。鮮度判定は `obsidian/src/usage.js` を共用 |
 | `PopupForm.cs` | 使用量と警告帯、ボタン、キーボード、スクロール・DPIレイアウト |
 | `Artwork.cs` | 描画補助、サービスの印、埋込アプリアイコン |
 | `Models.cs` / `Parsers.cs` | 表示用モデル、欠損値・期間・時刻の解釈 |

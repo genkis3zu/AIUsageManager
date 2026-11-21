@@ -27,6 +27,13 @@ namespace AIUsageManager
             if(args==null||args.Length!=1)return null;
             switch(args[0]) { case "--login-claude": return "Claude"; case "--login-codex": return "Codex"; case "--login-grok": return "Grok"; default: return null; }
         }
+        // A second start opens the running app's window, except for a login, a refresh, or a start in the background
+        // (at sign-in, or from the Stream Deck plugin when Stream Deck starts).
+        internal static bool ShowsRunningApp(string[] args)
+        {
+            if(LoginService(args)!=null)return false;
+            return !(args!=null&&args.Length==1&&(args[0]=="--refresh"||args[0]==StartAtSignIn.Argument));
+        }
         [STAThread]
         static void Main(string[] args)
         {
@@ -65,7 +72,7 @@ namespace AIUsageManager
                 string login=LoginService(args);
                 if(login=="Claude")claudeLogin.Set();else if(login=="Codex")codexLogin.Set();else if(login=="Grok")grokLogin.Set();
                 bool refresh=args.Length==1&&args[0]=="--refresh";
-                if(!created){if(refresh)refreshSignal.Set();else if(login==null)signal.Set();return;}
+                if(!created){if(refresh)refreshSignal.Set();else if(ShowsRunningApp(args))signal.Set();return;}
                 AppLocation.Save(AppLocation.DefaultPath(),Application.ExecutablePath);
                 try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal));}
                 finally {mutex.ReleaseMutex();}

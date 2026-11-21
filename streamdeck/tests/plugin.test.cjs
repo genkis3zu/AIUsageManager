@@ -32,6 +32,8 @@ function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', l
     images: context => sent.filter(s => s[0] === 'image' && s[1] === context).map(s => s[2]),
     settings: context => sent.filter(s => s[0] === 'settings' && s[1] === context).map(s => s[2]) };
 }
+// The tray app was running when Stream Deck started and was closed later (after the second read).
+const closedLater = (...after) => [{ kind: 'ok', json: SNAP }, { kind: 'absent' }, ...after];
 async function press(h, context, ms) { await h.plugin.handle({ event: 'keyDown', context }); h.tick(ms); await h.plugin.handle({ event: 'keyUp', context }); }
 
 test('a pipe name that could not be found is looked up again on the next poll', async () => {
@@ -131,8 +133,8 @@ test('keys that do not need login keep cycling the style on a short press', asyn
   assert.deepEqual(h.launchArgs, []); assert.equal(h.settings('k1').at(-1).style, 'horizontal');
 });
 test('disconnected press launches the resolved path and polls again after 2 s', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }] });
-  await h.plugin.handle(appear('k1'));
+  const h = harness({ reads: closedLater() });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   assert.ok(h.images('k1').at(-1).includes('未接続'));
   await press(h, 'k1', 100);
   assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']);
@@ -140,15 +142,15 @@ test('disconnected press launches the resolved path and polls again after 2 s', 
   const retry = h.timers.timeouts.find(t => t.ms === 2000);
   assert.ok(retry);
   retry.fn(); await h.plugin.poll();
-  assert.equal(h.reads(), 2);
+  assert.equal(h.reads(), 3);
   assert.ok(h.images('k1').at(-1).includes('30%'));
 });
 const flush = async () => { for (let i = 0; i < 3; i++) await new Promise(r => setImmediate(r)); };
 async function fire(h, ms) { const t = h.timers.timeouts.find(x => x.ms === ms && !x.fired); t.fired = true; t.fn(); await flush(); }
 
 test('after a launch every key shows 起動中, presses are ignored, and polls repeat at 2, 5 and 10 s', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }, { kind: 'ok', json: SNAP }] });
-  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('k2', ID + '.grok'));
+  const h = harness({ reads: closedLater({ kind: 'absent' }, { kind: 'ok', json: SNAP }) });
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('k2', ID + '.grok')); await h.plugin.poll();
   await press(h, 'k1', 100);
   assert.ok(h.images('k1').at(-1).includes('起動中')); assert.ok(h.images('k2').at(-1).includes('起動中'));
   assert.deepEqual(h.timers.timeouts.map(t => t.ms).sort((a, b) => a - b), [2000, 5000, 10000]);
@@ -160,8 +162,8 @@ test('after a launch every key shows 起動中, presses are ignored, and polls r
   assert.ok(h.images('k1').at(-1).includes('30%')); assert.ok(h.images('k2').at(-1).includes('40%'));
 });
 test('起動中 ends after the last re-poll when the app never appears, and presses launch again', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }, { kind: 'absent' }, { kind: 'absent' }] });
-  await h.plugin.handle(appear('k1'));
+  const h = harness({ reads: closedLater({ kind: 'absent' }, { kind: 'absent' }, { kind: 'absent' }) });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   await press(h, 'k1', 100);
   await fire(h, 2000); await fire(h, 5000);
   assert.ok(h.images('k1').at(-1).includes('起動中'));
@@ -172,8 +174,8 @@ test('起動中 ends after the last re-poll when the app never appears, and pres
 });
 test('a key removed while its launch fails does not throw', async () => {
   let fail;
-  const h = harness({ reads: [{ kind: 'absent' }], launch: () => new Promise((_, reject) => { fail = () => reject(new Error('nope')); }) });
-  await h.plugin.handle(appear('k1'));
+  const h = harness({ reads: closedLater(), launch: () => new Promise((_, reject) => { fail = () => reject(new Error('nope')); }) });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   await h.plugin.handle({ event: 'keyDown', context: 'k1' });
   const pending = h.plugin.handle({ event: 'keyUp', context: 'k1' });
   await h.plugin.handle({ event: 'willDisappear', context: 'k1' });
@@ -181,8 +183,8 @@ test('a key removed while its launch fails does not throw', async () => {
   await pending;
 });
 test('disconnected press without a path shows アプリの場所を設定 and alerts, without launching', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }], resolve: () => null });
-  await h.plugin.handle(appear('k1'));
+  const h = harness({ reads: closedLater({ kind: 'absent' }), resolve: () => null });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   await press(h, 'k1', 100);
   assert.deepEqual(h.launches, []);
   assert.ok(h.sent.some(s => s[0] === 'alert' && s[1] === 'k1'));
@@ -192,16 +194,16 @@ test('disconnected press without a path shows アプリの場所を設定 and al
   assert.ok(h.images('k1').at(-1).includes('未接続'));
 });
 test('a failed launch shows アプリの場所を設定', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }], launch: async () => { throw new Error('nope'); } });
-  await h.plugin.handle(appear('k1'));
+  const h = harness({ reads: closedLater(), launch: async () => { throw new Error('nope'); } });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   await press(h, 'k1', 100);
   assert.ok(h.images('k1').at(-1).includes('アプリの場所を設定'));
   assert.ok(!h.timers.timeouts.some(t => t.ms === 2000));
 });
 test('manual appPath from global settings reaches resolveAppPath', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }] });
+  const h = harness({ reads: closedLater() });
   await h.plugin.handle({ event: 'didReceiveGlobalSettings', payload: { settings: { appPath: 'D:\\Tools\\AIUsageManager.exe' } } });
-  await h.plugin.handle(appear('k1'));
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
   await press(h, 'k1', 100);
   assert.deepEqual(h.resolveCalls, ['D:\\Tools\\AIUsageManager.exe']);
 });
@@ -244,8 +246,8 @@ test('a waiting key opens nothing when the longest wait has no app to open', asy
   assert.deepEqual(h.opened(), []); assert.deepEqual(h.launches, []);
 });
 test('a disconnected waiting key starts the tray app', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }] });
-  await h.plugin.handle(appear('w1', ID + '.waiting'));
+  const h = harness({ reads: closedLater() });
+  await h.plugin.handle(appear('w1', ID + '.waiting')); await h.plugin.poll();
   await press(h, 'w1', 100);
   assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.opened(), []);
 });
@@ -276,8 +278,8 @@ test('without an outage page the AIの状況 key opens the Claude status page', 
   }
 });
 test('a disconnected AIの状況 key starts the tray app instead of opening a page', async () => {
-  const h = harness({ reads: [{ kind: 'absent' }] });
-  await h.plugin.handle(appear('s1', ID + '.status'));
+  const h = harness({ reads: closedLater() });
+  await h.plugin.handle(appear('s1', ID + '.status')); await h.plugin.poll();
   assert.ok(h.images('s1').at(-1).includes('未接続'));
   await press(h, 's1', 100);
   assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.opened(), []);
@@ -289,4 +291,59 @@ test('identical images are not resent', async () => {
   const count = h.images('k1').length;
   await h.plugin.poll();
   assert.equal(h.images('k1').length, count);
+});
+test('when Stream Deck starts without the tray app, the plugin starts it once in the background', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }, { kind: 'ok', json: SNAP }] });
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('s1', ID + '.status'));
+  assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.launchArgs, [['--background']]);
+  assert.ok(h.images('k1').at(-1).includes('起動中')); assert.ok(h.images('s1').at(-1).includes('起動中'));
+  assert.deepEqual(h.timers.timeouts.map(t => t.ms).sort((a, b) => a - b), [2000, 5000, 10000]);
+  assert.ok(!h.sent.some(s => s[0] === 'alert'));
+  await fire(h, 2000); await fire(h, 5000);
+  assert.ok(h.images('k1').at(-1).includes('30%'));
+  assert.equal(h.launches.length, 1);
+});
+test('a tray app closed after Stream Deck started is not started again by itself', async () => {
+  const h = harness({ reads: closedLater({ kind: 'absent' }) });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll(); await h.plugin.poll();
+  assert.deepEqual(h.launches, []); assert.ok(h.images('k1').at(-1).includes('未接続'));
+});
+test('the start waits until a busy pipe has failed twice', async () => {
+  const h = harness({ reads: [{ kind: 'failed' }, { kind: 'failed' }] });
+  await h.plugin.handle(appear('k1'));
+  assert.deepEqual(h.launches, []);
+  await h.plugin.poll();
+  assert.deepEqual(h.launchArgs, [['--background']]);
+});
+test('a start that cannot happen leaves 未接続 without an alert; a press then says what is wrong', async () => {
+  for (const options of [{ resolve: () => null }, { launch: async () => { throw new Error('nope'); } }]) {
+    const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }], ...options });
+    await h.plugin.handle(appear('k1'));
+    assert.ok(h.images('k1').at(-1).includes('未接続'));
+    assert.ok(!h.sent.some(s => s[0] === 'alert')); assert.ok(!h.timers.timeouts.some(t => t.ms === 2000));
+    await press(h, 'k1', 100);
+    assert.ok(h.images('k1').at(-1).includes('アプリの場所を設定'));
+  }
+});
+test('a first key that appears more than a minute after Stream Deck started does not start the tray app', async () => {
+  const late = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }] });
+  late.tick(61000);
+  await late.plugin.handle(appear('k1'));
+  assert.deepEqual(late.launches, []); assert.ok(late.images('k1').at(-1).includes('未接続'));
+  const early = harness({ reads: [{ kind: 'absent' }] });
+  early.tick(59000);
+  await early.plugin.handle(appear('k1'));
+  assert.deepEqual(early.launchArgs, [['--background']]);
+});
+test('a timer left from an earlier start does not end a later start early', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'ok', json: SNAP }, { kind: 'absent' }, { kind: 'absent' }, { kind: 'absent' }] });
+  await h.plugin.handle(appear('k1'));
+  await fire(h, 2000);
+  assert.ok(h.images('k1').at(-1).includes('30%'));
+  await h.plugin.poll();
+  assert.ok(h.images('k1').at(-1).includes('未接続'));
+  await press(h, 'k1', 100);
+  assert.equal(h.launches.length, 2);
+  await fire(h, 5000); await fire(h, 10000);
+  assert.ok(h.images('k1').at(-1).includes('起動中'));
 });
