@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -20,6 +21,15 @@ namespace AIUsageManager
         public bool Claudian;
         // now_doing_hotkey=Ctrl+Alt+N: the tray app opens the window with this shortcut key.
         public string Hotkey;
+        // now_doing_button1 … 9: the window's buttons, at Number-1; the numbers written wrongly are in BadButtons.
+        public NowDoingButton[] Buttons = new NowDoingButton[NowDoingButton.Count];
+        public List<int> BadButtons = new List<int>();
+        // The user's programs: run after a line is written (now_doing_after), and when the window opens for the
+        // まだのこと list (now_doing_list), in now_doing_workdir (the app's folder when not set).
+        public string After, List, Workdir;
+        // now_doing_ai_done=on: the tray app writes finished AI work to the 日中ログ, except work in these folders.
+        public bool AiDone;
+        public string[] AiDoneExclude = new string[0];
 
         public static NowDoingSettings Parse(string ini)
         {
@@ -30,14 +40,41 @@ namespace AIUsageManager
                 int equals = line.IndexOf('=');
                 if (equals <= 0) continue;
                 string key = line.Substring(0, equals).Trim(), value = line.Substring(equals + 1).Trim();
+                int number = ButtonNumber(key);
+                if (number > 0)
+                {
+                    // A text button may end with a space on purpose (text:⏱️ ), so only the front is trimmed.
+                    string written = line.Substring(equals + 1).TrimStart();
+                    settings.BadButtons.Remove(number);
+                    settings.Buttons[number - 1] = null;
+                    if (written.Length == 0) continue;
+                    settings.Buttons[number - 1] = NowDoingButton.Parse(number, written);
+                    if (settings.Buttons[number - 1] == null) { settings.BadButtons.Add(number); settings.BadButtons.Sort(); }
+                    continue;
+                }
                 if (value.Length == 0) continue;
                 if (key == "now_doing_note") settings.Note = value;
                 else if (key == "now_doing_heading") settings.Heading = value;
                 else if (key == "now_doing_before") settings.Before = value;
                 else if (key == "now_doing_claudian") settings.Claudian = value == "on";
                 else if (key == "now_doing_hotkey") settings.Hotkey = value;
+                else if (key == "now_doing_after") settings.After = value;
+                else if (key == "now_doing_list") settings.List = value;
+                else if (key == "now_doing_workdir") settings.Workdir = value;
+                else if (key == "now_doing_ai_done") settings.AiDone = value == "on";
+                else if (key == "now_doing_ai_done_exclude")
+                    settings.AiDoneExclude = value.Split(';').Select(p => p.Trim()).Where(p => p.Length > 0).ToArray();
             }
             return settings;
+        }
+
+        // 1 … 9 for now_doing_button1 … now_doing_button9, otherwise 0.
+        static int ButtonNumber(string key)
+        {
+            const string prefix = "now_doing_button";
+            if (key.Length != prefix.Length + 1 || !key.StartsWith(prefix, StringComparison.Ordinal)) return 0;
+            char digit = key[prefix.Length];
+            return digit >= '1' && digit <= '9' ? digit - '0' : 0;
         }
         public static NowDoingSettings Load(string path)
         {
