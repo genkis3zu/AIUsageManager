@@ -262,9 +262,26 @@ namespace AIUsageManager
             if (!input.IsHandleCreated || title == null) return;
             int count = input.GetLineFromCharIndex(input.TextLength) + 1;
             ScrollBars bars = count > MaxInputLines ? ScrollBars.Vertical : ScrollBars.None;
-            if (input.ScrollBars != bars) input.ScrollBars = bars;
+            // Showing or hiding the scroll bar makes a new edit box (WinForms re-creates the handle). That must not happen
+            // while the box is still handling the key or paste that changed the text, so it is done right after.
+            if (input.ScrollBars != bars && !scrollBarsPending) { scrollBarsPending = true; BeginInvoke(new Action(FitScrollBars)); }
             int visible = Math.Max(1, Math.Min(MaxInputLines, count));
             if (visible != lines) { lines = visible; Place(); }
+        }
+
+        bool scrollBarsPending;
+        void FitScrollBars()
+        {
+            scrollBarsPending = false;
+            if (IsDisposed || !input.IsHandleCreated) return;
+            ScrollBars bars = input.GetLineFromCharIndex(input.TextLength) + 1 > MaxInputLines ? ScrollBars.Vertical : ScrollBars.None;
+            if (input.ScrollBars == bars) return;
+            // The new box would otherwise select all its text when it gets the keyboard back (after the window emptied the
+            // box itself), and the next key would replace it; the caret and selection are kept as they were.
+            int start = input.SelectionStart, length = input.SelectionLength;
+            input.ScrollBars = bars;
+            input.Select(start, length);
+            input.ScrollToCaret();
         }
 
         protected override void OnLoad(EventArgs e) { Arrange(); base.OnLoad(e); }

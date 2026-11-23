@@ -52,13 +52,27 @@ internal static partial class Tests
                 case "exit": return int.Parse(args[2], CultureInfo.InvariantCulture);
                 case "sleep": Thread.Sleep(60000); return 0;
                 case "spawn-sleep":
+                    // The started child's id, then this script's own id.
                     using (Process child = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location, "--child sleep") { UseShellExecute = false, CreateNoWindow = true }))
-                        File.WriteAllText(args[2], child.Id.ToString(CultureInfo.InvariantCulture));
+                        File.WriteAllText(args[2], child.Id.ToString(CultureInfo.InvariantCulture) + "\n" + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture));
                     Thread.Sleep(60000);
+                    return 0;
+                case "start-and-exit":
+                    // Starts a script that keeps running, then ends this program without stopping it (as the window does when it closes).
+                    NowDoingScript.RunAsync(NowDoingCommand.Quote(Assembly.GetExecutingAssembly().Location) + " --child spawn-sleep " + NowDoingCommand.Quote(args[2]), null,
+                        Path.GetDirectoryName(args[2]), new NowDoingScriptLimits { TimeoutMs = 60000, MaxBytes = 4096, MaxLines = 20 }, CancellationToken.None);
+                    for (var clock = Stopwatch.StartNew(); !File.Exists(args[2]) && clock.ElapsedMilliseconds < 10000; ) Thread.Sleep(50);
+                    Thread.Sleep(200);
                     return 0;
                 default: return 99;
             }
         }
+    }
+
+    // The process ids spawn-sleep wrote: the started child's, then the script's own.
+    static int[] Pids(string file)
+    {
+        return File.ReadAllText(file).Split('\n').Select(p => int.Parse(p.Trim(), CultureInfo.InvariantCulture)).ToArray();
     }
 
     static bool Ended(int pid, int withinMs)
@@ -109,7 +123,39 @@ internal static partial class Tests
             File.Delete(file);
             NowDoingScriptResult r = run(child("spawn-sleep " + NowDoingCommand.Quote(file)), null, new NowDoingScriptLimits { TimeoutMs = 1000, MaxBytes = 4096, MaxLines = 20 });
             Assert(!r.Ok && r.Reason == "時間切れ（1秒）");
-            Assert(Ended(int.Parse(File.ReadAllText(file), CultureInfo.InvariantCulture), 2000));
+            Assert(Pids(file).All(pid => Ended(pid, 2000)));
+        });
+        Check("A script is ended when the program that started it ends", () => {
+            string file = Path.Combine(temp, "orphan.pid");
+            File.Delete(file);
+            using (Process starter = Process.Start(new ProcessStartInfo(self, "--child start-and-exit " + NowDoingCommand.Quote(file)) { UseShellExecute = false, CreateNoWindow = true }))
+                Assert(starter.WaitForExit(15000));
+            Assert(File.Exists(file) && Pids(file).All(pid => Ended(pid, 3000)));
+        });
+        Check("A cancelled script ends even when its cancellation is disposed at once", () => {
+            string file = Path.Combine(temp, "disposed.pid");
+            File.Delete(file);
+            var cancel = new CancellationTokenSource();
+            Task<NowDoingScriptResult> task = NowDoingScript.RunAsync(child("spawn-sleep " + NowDoingCommand.Quote(file)), null, temp, new NowDoingScriptLimits { TimeoutMs = 60000, MaxBytes = 4096, MaxLines = 20 }, cancel.Token);
+            cancel.Cancel(); cancel.Dispose();
+            Assert(task.Wait(10000) && !task.IsFaulted && !task.Result.Ok && task.Result.Reason == "中止しました");
+            if (File.Exists(file)) Assert(Pids(file).All(pid => Ended(pid, 2000)));
+        });
+        Check("Batch files are refused, since Windows runs them through cmd", () => {
+            foreach (string batch in new[] { "x.bat --a", "\"C:\\My Scripts\\after.CMD\"", @"C:\s\a.Bat" })
+            {
+                NowDoingScriptResult r = run(batch, new[] { "--text", "Q&A" }, NowDoingScriptLimits.After);
+                Assert(!r.Ok && r.Reason == "バッチファイル（.bat・.cmd）は使えません");
+            }
+        });
+        Check("Only processes started after the script are ended with it, even when Windows reuses a process id", () => {
+            var start = new DateTime(2026, 11, 24, 10, 0, 0);
+            var table = new Dictionary<int, ProcessEntry> {
+                { 100, new ProcessEntry { Parent = 1 } }, { 200, new ProcessEntry { Parent = 100 } }, { 300, new ProcessEntry { Parent = 100 } },
+                { 400, new ProcessEntry { Parent = 300 } }, { 500, new ProcessEntry { Parent = 200 } }, { 600, new ProcessEntry { Parent = 100 } } };
+            var started = new Dictionary<int, DateTime> { { 200, start.AddSeconds(1) }, { 300, start.AddSeconds(-10) }, { 400, start.AddSeconds(5) }, { 500, start.AddSeconds(2) } };
+            List<int> found = NowDoingScript.Descendants(100, start, table, id => started.ContainsKey(id) ? started[id] : (DateTime?)null);
+            Assert(found.OrderBy(i => i).SequenceEqual(new[] { 200, 500 }));
         });
         Check("Failures say why", () => {
             Assert(run(child("fail"), null, NowDoingScriptLimits.After).Reason == "理由の1行目");
@@ -131,7 +177,7 @@ internal static partial class Tests
                 Thread.Sleep(100);
                 cancel.Cancel();
                 Assert(task.Wait(5000) && !task.Result.Ok && task.Result.Reason == "中止しました");
-                Assert(Ended(int.Parse(File.ReadAllText(file), CultureInfo.InvariantCulture), 2000));
+                Assert(Pids(file).All(pid => Ended(pid, 2000)));
             }
         });
     }

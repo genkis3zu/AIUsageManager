@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,6 +51,10 @@ namespace AIUsageManager
         {
             string[] words = NowDoingCommand.Split(command);
             if (words == null) return Fail("命令の書き方が違います");
+            // Windows runs a batch file through cmd.exe, which reads the arguments again: & | % " in the typed text would
+            // become commands. Only programs that get their arguments as given are run.
+            if (words[0].EndsWith(".bat", StringComparison.OrdinalIgnoreCase) || words[0].EndsWith(".cmd", StringComparison.OrdinalIgnoreCase))
+                return Fail("バッチファイル（.bat・.cmd）は使えません");
             try { if (string.IsNullOrEmpty(workdir) || !Directory.Exists(workdir)) return Fail("作業フォルダーがありません"); }
             catch (ArgumentException) { return Fail("作業フォルダーがありません"); }
             var info = new ProcessStartInfo(words[0], NowDoingCommand.Join(words.Skip(1).Concat(arguments ?? new string[0])))
@@ -64,7 +69,19 @@ namespace AIUsageManager
             catch (IOException) { process = null; }
             catch (ArgumentException) { process = null; }
             if (process == null) return Fail("起動できません（" + words[0] + "）");
-            return Task.Run(() => Wait(process, limits, cancel));
+            // The script and what it starts go into a job that Windows ends when this program ends, so a script is never
+            // left running after the window has closed.
+            var job = ScriptJob.For(process);
+            // Cancelling sets an event of this run's own, so it still works when the caller has already disposed its source.
+            var stop = new ManualResetEvent(false);
+            CancellationTokenRegistration registration;
+            try { registration = cancel.Register(() => { try { stop.Set(); } catch (ObjectDisposedException) { } }); }
+            catch (ObjectDisposedException) { registration = default(CancellationTokenRegistration); stop.Set(); }
+            return Task.Run(() =>
+            {
+                try { return Wait(process, job, limits, stop); }
+                finally { registration.Dispose(); stop.Dispose(); if (job != null) job.Dispose(); }
+            });
         }
 
         // The process handle, to wait for the process to end together with other handles.
@@ -73,7 +90,77 @@ namespace AIUsageManager
             public ExitHandle(Process process) { SafeWaitHandle = new SafeWaitHandle(process.Handle, false); }
         }
 
-        static NowDoingScriptResult Wait(Process process, NowDoingScriptLimits limits, CancellationToken cancel)
+        // A Windows job object for one script. While this program holds it, every process the script starts belongs to it
+        // too; when this program ends (the window closed), Windows ends them all. After a script that finished normally
+        // the job is let go without ending anything it left running on purpose.
+        sealed class ScriptJob : IDisposable
+        {
+            const int ExtendedLimitInformation = 9;
+            const uint KillOnJobClose = 0x2000;
+            IntPtr handle;
+
+            ScriptJob(IntPtr handle) { this.handle = handle; }
+
+            // Null when Windows does not allow it (for example when this program is in a job that allows no nested ones).
+            public static ScriptJob For(Process process)
+            {
+                IntPtr handle = CreateJobObject(IntPtr.Zero, null);
+                if (handle == IntPtr.Zero) return null;
+                var job = new ScriptJob(handle);
+                try
+                {
+                    if (job.Limit(KillOnJobClose) && AssignProcessToJobObject(handle, process.Handle)) return job;
+                }
+                catch (InvalidOperationException) { }
+                job.Dispose();
+                return null;
+            }
+
+            bool Limit(uint flags)
+            {
+                var info = new ExtendedLimit { Basic = new BasicLimit { LimitFlags = flags } };
+                return SetInformationJobObject(handle, ExtendedLimitInformation, ref info, Marshal.SizeOf(typeof(ExtendedLimit)));
+            }
+
+            // Ends the script and everything it started.
+            public void End() { if (handle != IntPtr.Zero) TerminateJobObject(handle, 1); }
+
+            // Lets the processes go: closing the handle then ends nothing.
+            public void Release() { if (handle != IntPtr.Zero) Limit(0); }
+
+            public void Dispose()
+            {
+                if (handle != IntPtr.Zero) CloseHandle(handle);
+                handle = IntPtr.Zero;
+            }
+
+            [StructLayout(LayoutKind.Sequential)]
+            struct BasicLimit
+            {
+                public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+                public uint LimitFlags;
+                public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+                public uint ActiveProcessLimit;
+                public UIntPtr Affinity;
+                public uint PriorityClass, SchedulingClass;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            struct IoCounters { public ulong ReadOperations, WriteOperations, OtherOperations, ReadBytes, WriteBytes, OtherBytes; }
+            [StructLayout(LayoutKind.Sequential)]
+            struct ExtendedLimit
+            {
+                public BasicLimit Basic;
+                public IoCounters Io;
+                public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+            }
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+            [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int infoClass, ref ExtendedLimit info, int length);
+            [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+            [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint exitCode);
+            [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+        }
+
+        static NowDoingScriptResult Wait(Process process, ScriptJob job, NowDoingScriptLimits limits, WaitHandle stop)
         {
             using (process)
             using (var tooMuch = new ManualResetEvent(false))
@@ -87,7 +174,7 @@ namespace AIUsageManager
                 Task readingErrors = Task.Run(() => Read(process.StandardError.BaseStream, error, MaxErrorBytes, null));
                 var clock = Stopwatch.StartNew();
                 Func<int> left = () => (int)Math.Max(0, limits.TimeoutMs - clock.ElapsedMilliseconds);
-                int which = WaitHandle.WaitAny(new[] { exited, tooMuch, cancel.WaitHandle }, left());
+                int which = WaitHandle.WaitAny(new[] { exited, tooMuch, stop }, left());
                 string reason = null;
                 if (which == 1) reason = "出力が多すぎます";
                 else if (which == 2) reason = "中止しました";
@@ -97,10 +184,12 @@ namespace AIUsageManager
                 else if (tooMuch.WaitOne(0)) reason = "出力が多すぎます";
                 if (reason != null)
                 {
-                    EndTree(process);
+                    if (job != null) job.End();
+                    else EndTree(process);
                     Task.WaitAll(new[] { reading, readingErrors }, 2000);
                     return new NowDoingScriptResult { Reason = reason };
                 }
+                if (job != null) job.Release();
                 string text = Clean(output.ToArray());
                 if (text.Length > 0 && text.Split('\n').Length > limits.MaxLines) return new NowDoingScriptResult { Reason = "出力が多すぎます" };
                 int code = process.ExitCode;
@@ -155,33 +244,50 @@ namespace AIUsageManager
             return null;
         }
 
-        // Ends the process and the processes it started (and theirs), as far as they still run. Processes that
-        // started before it are never touched, even when Windows has given one of them a reused id.
+        // Without a job: ends the process and the processes it started (and theirs), as far as they still run. Processes
+        // that started before it, and the ones below them, are never touched, even when Windows has reused an id.
         static void EndTree(Process root)
         {
             DateTime started;
             try { started = root.StartTime; }
             catch (InvalidOperationException) { started = DateTime.MaxValue; }
             catch (Win32Exception) { started = DateTime.MaxValue; }
-            var ids = new List<int> { root.Id };
-            IDictionary<int, ProcessEntry> table = ProcessTree.List();
-            for (int i = 0; i < ids.Count; i++)
-                foreach (KeyValuePair<int, ProcessEntry> entry in table)
-                    if (entry.Value.Parent == ids[i] && !ids.Contains(entry.Key)) ids.Add(entry.Key);
+            List<int> ids = Descendants(root.Id, started, ProcessTree.List(), StartedAt);
             try { if (!root.HasExited) root.Kill(); }
             catch (InvalidOperationException) { }
             catch (Win32Exception) { }
-            foreach (int id in ids.Skip(1))
+            foreach (int id in ids)
             {
-                try
-                {
-                    using (Process p = Process.GetProcessById(id))
-                        if (p.StartTime >= started) p.Kill();
-                }
+                try { using (Process p = Process.GetProcessById(id)) p.Kill(); }
                 catch (ArgumentException) { }
                 catch (InvalidOperationException) { }
                 catch (Win32Exception) { }
             }
+        }
+
+        // The processes the script started, and the ones they started, from one process listing. A process that started
+        // before the script is not one of them even when its recorded parent id is the script's (Windows reuses ids), and
+        // nothing below it is looked at either; one whose start time cannot be read is left alone.
+        public static List<int> Descendants(int root, DateTime started, IDictionary<int, ProcessEntry> table, Func<int, DateTime?> startedOf)
+        {
+            var ids = new List<int> { root };
+            var looked = new HashSet<int> { root };
+            for (int i = 0; i < ids.Count; i++)
+                foreach (KeyValuePair<int, ProcessEntry> entry in table)
+                {
+                    if (entry.Value.Parent != ids[i] || !looked.Add(entry.Key)) continue;
+                    DateTime? at = startedOf(entry.Key);
+                    if (at.HasValue && at.Value >= started) ids.Add(entry.Key);
+                }
+            return ids.Skip(1).ToList();
+        }
+
+        static DateTime? StartedAt(int id)
+        {
+            try { using (Process p = Process.GetProcessById(id)) return p.StartTime; }
+            catch (ArgumentException) { return null; }
+            catch (InvalidOperationException) { return null; }
+            catch (Win32Exception) { return null; }
         }
     }
 }

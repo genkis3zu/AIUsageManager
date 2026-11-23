@@ -234,17 +234,24 @@ namespace AIUsageManager
             if(now<doneNextTry)return;
             AiDoneEntry entry=doneEntry;
             string path=string.IsNullOrEmpty(nowDoing.Note)?null:NowDoingNote.NotePath(nowDoing.Note,entry.Time);
-            DateTime changed;
-            try { if(path==null||!System.IO.File.Exists(path)){doneEntry=null;return;} changed=System.IO.File.GetLastWriteTimeUtc(path); }
-            catch(System.IO.IOException){doneEntry=null;return;}
-            catch(UnauthorizedAccessException){doneEntry=null;return;}
-            catch(System.Security.SecurityException){doneEntry=null;return;}
-            AiDoneWait decision=AiDoneLog.Decide(changed,now.UtcDateTime,doneDue.UtcDateTime);
+            // The diary may be on a synced or network folder; it is looked at off this thread.
+            DateTime? changed=path==null?null:await Task.Run(()=>DiaryChanged(path));
+            if(exiting)return;
+            if(changed==null){doneEntry=null;return;}
+            AiDoneWait decision=AiDoneLog.Decide(changed.Value,now.UtcDateTime,doneDue.UtcDateTime);
             if(decision==AiDoneWait.Wait){doneNextTry=now.AddSeconds(10);return;}
             doneEntry=null;
             if(decision==AiDoneWait.GiveUp)return;
             string backup=NowDoingNote.BackupPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ai-done-last.md");
             await Task.Run(()=>NowDoingNote.Write(nowDoing,entry.Time,entry.Text,backup,null,AiDoneLog.Mark));
+        }
+        // When the diary was last written, or null when it is not there or cannot be looked at.
+        static DateTime? DiaryChanged(string path)
+        {
+            try { return System.IO.File.Exists(path)?System.IO.File.GetLastWriteTimeUtc(path):(DateTime?)null; }
+            catch(System.IO.IOException){return null;}
+            catch(UnauthorizedAccessException){return null;}
+            catch(System.Security.SecurityException){return null;}
         }
         void ApplyTheme()
         {

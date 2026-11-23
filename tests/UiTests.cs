@@ -85,6 +85,7 @@ internal static class UiTests
         themes.HideDropDown();menu.Close();
     }
     [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     static void CheckHotkeyAndDrag()
     {
         var key=NowDoingHotkey.Parse("Ctrl+Alt+Shift+F24");int presses=0;
@@ -100,6 +101,8 @@ internal static class UiTests
         using(var again=new HotkeyWindow(key,()=>{}))Assert(again.Registered,"Closing gives the shortcut key back to Windows");
         var hook=new DoubleTapHook(DoubleTapKey.RightShift,()=>{});
         Assert(hook.Installed,"The keyboard hook for a double press is installed");
+        // Every key on the PC waits for the hook, so it must not wait for the tray's window thread (diary checks, menus).
+        Assert(hook.HookThreadId!=0&&hook.HookThreadId!=GetCurrentThreadId(),"The keyboard hook runs on a thread of its own");
         hook.Dispose();
         Assert(!hook.Installed,"Closing removes the keyboard hook");
         using(var again=new DoubleTapHook(DoubleTapKey.RightShift,()=>{}))Assert(again.Installed,"The keyboard hook can be installed again");
@@ -273,6 +276,17 @@ internal static class UiTests
             Assert(form.Visible&&form.Status==NowDoingForm.TooLongToSend&&form.StatusIsFailure&&written.Count==1&&sent.Count==0,"More than 4000 characters is neither written nor sent");
             form.Input="一行目\r\n二行目\r\n三行目";form.Press(Keys.Control|Keys.Enter);
             Assert(!form.Visible&&written[1]=="一行目（Claudian へ・3行）"&&sent.Count==1&&sent[0]=="一行目\n二行目\n三行目","Ctrl+Enter writes the first line and sends the whole text");
+        }
+        using(var form=new NowDoingForm(opened,view,Actions(written,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            var box=(NowDoingTextBox)Field<TextBox>(form,"input");box.Focus();
+            // After a failed after script the window empties the box itself; then a long text is pasted and typed after.
+            form.Input="x";form.Input="";
+            string twenty=string.Join("\n",Enumerable.Range(1,20));
+            box.PastedText=()=>twenty;SendMessage(box.Handle,0x302,IntPtr.Zero,IntPtr.Zero);Application.DoEvents();
+            SendMessage(box.Handle,0x102,(IntPtr)'Z',IntPtr.Zero);
+            Assert(form.InputLines==6&&form.Input==twenty.Replace("\n","\r\n")+"Z","Text in the box stays when the box starts to scroll after it was emptied by the window");
         }
         Func<string,string,Task<NowDoingScriptResult>> shows=(mode,text)=>{calls.Add(mode+"|"+text);return Result(true,"🚶 散歩 ✅\n2行目");};
         using(var form=new NowDoingForm(opened,view,Actions(written,null,shows),ThemePalette.Light))

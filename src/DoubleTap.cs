@@ -82,17 +82,40 @@ namespace AIUsageManager
         readonly SynchronizationContext context;
         readonly Action pressed;
         IntPtr hook;
+        Thread thread;
 
         public bool Installed { get { return hook != IntPtr.Zero; } }
+        // The Windows thread whose message loop runs the hook.
+        internal uint HookThreadId { get; private set; }
 
-        // `pressed` runs later on the thread that made the hook, never inside the hook: Windows removes a hook that answers slowly.
+        // The hook runs on a thread of its own: every key on the PC waits for it, so it must not wait for the tray app's
+        // window thread. `pressed` runs later on the thread that made the hook (the tray's), never inside the hook.
         public DoubleTapHook(DoubleTapKey key, Action pressed)
         {
             detector = new DoubleTapDetector(key);
             this.pressed = pressed;
             context = SynchronizationContext.Current;
             proc = Hook;
+            using (var ready = new ManualResetEvent(false))
+            {
+                thread = new Thread(() => Loop(ready)) { IsBackground = true, Name = "AIUsageManager keyboard hook" };
+                thread.Start();
+                ready.WaitOne(5000);
+            }
+        }
+
+        void Loop(ManualResetEvent ready)
+        {
+            Message message;
+            // A message queue first, so Dispose can always post WM_QUIT to this thread.
+            PeekMessage(out message, IntPtr.Zero, 0, 0, 0);
+            HookThreadId = GetCurrentThreadId();
             hook = SetWindowsHookEx(WH_KEYBOARD_LL, proc, GetModuleHandle(null), 0);
+            ready.Set();
+            if (hook == IntPtr.Zero) return;
+            while (GetMessage(out message, IntPtr.Zero, 0, 0) > 0) DispatchMessage(ref message);
+            UnhookWindowsHookEx(hook);
+            hook = IntPtr.Zero;
         }
 
         public static TapKey Classify(int virtualKey)
@@ -130,10 +153,22 @@ namespace AIUsageManager
 
         public void Dispose()
         {
-            if (hook != IntPtr.Zero) UnhookWindowsHookEx(hook);
+            if (thread == null) return;
+            // The hook thread removes the hook itself and ends.
+            if (HookThreadId != 0) PostThreadMessage(HookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+            thread.Join(2000);
+            thread = null;
             hook = IntPtr.Zero;
         }
 
+        const uint WM_QUIT = 0x12;
+        [StructLayout(LayoutKind.Sequential)]
+        struct Message { public IntPtr Window; public uint Id; public IntPtr WParam, LParam; public uint Time; public int X, Y, Private; }
+        [DllImport("user32.dll")] static extern bool PeekMessage(out Message message, IntPtr window, uint first, uint last, uint remove);
+        [DllImport("user32.dll")] static extern int GetMessage(out Message message, IntPtr window, uint first, uint last);
+        [DllImport("user32.dll")] static extern IntPtr DispatchMessage(ref Message message);
+        [DllImport("user32.dll")] static extern bool PostThreadMessage(uint thread, uint message, IntPtr wParam, IntPtr lParam);
+        [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int hook, HookProc proc, IntPtr module, uint thread);
         [DllImport("user32.dll")] static extern IntPtr CallNextHookEx(IntPtr hook, int code, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr hook);
