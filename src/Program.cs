@@ -37,6 +37,8 @@ namespace AIUsageManager
         [STAThread]
         static void Main(string[] args)
         {
+            // The いまやってること window is its own short process: it neither needs nor touches the tray app.
+            if(args.Length==1&&args[0]==NowDoingNote.Argument) {NowDoingForm.Run();return;}
             if(args.Length==1&&args[0]=="--obsidian-data") {
                 string json=UsageSnapshot.Disconnected();
                 try {json=SnapshotClient.ReadAsync(SnapshotServer.CurrentName()).GetAwaiter().GetResult();}catch { }

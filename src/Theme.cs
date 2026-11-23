@@ -68,7 +68,17 @@ namespace AIUsageManager
             try
             {
                 string waitingValue=waiting==WaitingNoticeMode.Off?"off":waiting==WaitingNoticeMode.Frequent?"frequent":"standard";
-                File.WriteAllText(path + ".tmp", "theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine+"waiting="+waitingValue+Environment.NewLine);
+                // Lines this class does not own (e.g. the now_doing_ keys) are kept as they are.
+                var text=new System.Text.StringBuilder("theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine+"waiting="+waitingValue+Environment.NewLine);
+                if (File.Exists(path))
+                    foreach(string raw in File.ReadAllText(path).Split('\n')) {
+                        string line=raw.TrimEnd('\r');
+                        int equals=line.IndexOf('=');
+                        string key=equals<0?line.Trim():line.Substring(0,equals).Trim();
+                        if(line.Trim().Length==0||key=="theme"||key=="notifications"||key=="waiting")continue;
+                        text.Append(line).Append(Environment.NewLine);
+                    }
+                File.WriteAllText(path + ".tmp", text.ToString());
                 if (File.Exists(path)) File.Replace(path + ".tmp", path, null);
                 else File.Move(path + ".tmp", path);
                 return true;

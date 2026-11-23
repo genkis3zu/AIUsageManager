@@ -85,6 +85,33 @@ internal static class UiTests
         themes.HideDropDown();menu.Close();
     }
     [STAThread]
+    static void CheckNowDoingWindow()
+    {
+        var written=new List<string>();var results=new Queue<NowDoingFailure>(new[]{NowDoingFailure.Busy,NowDoingFailure.None});
+        var opened=new DateTime(2026,11,24,11,5,0);
+        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.TopMost&&form.Heading=="11:05 の記録　Enter で日誌へ ／ Esc でやめる","The いまやってること window is on top and says the minute and the keys");
+            Assert(Field<TextBox>(form,"input").MaxLength==200,"The いまやってること box takes at most 200 characters");
+            form.Input="  見積の表\tを直している ";form.Submit();
+            Assert(form.Visible&&form.Input=="  見積の表\tを直している "&&form.Heading=="日誌が使用中です。もう一度 Enter を押してください"&&Field<Label>(form,"header").ForeColor==ThemePalette.Light.Red,"A failed write keeps the window and the text, and shows the reason in red");
+            form.Submit();
+            Assert(!form.Visible&&written.Count==2&&written[0]=="見積の表 を直している"&&written[1]==written[0],"Enter again writes the cleaned text and closes the window");
+        }
+        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input=" \t ";form.Submit();
+            Assert(!form.Visible&&written.Count==2,"An empty line closes the window without writing");
+        }
+        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input="x";
+            var message=new Message();
+            typeof(NowDoingForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{message,Keys.Escape});
+            Assert(!form.Visible&&written.Count==2,"Esc closes the window without writing");
+        }
+    }
     static int Main()
     {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
@@ -97,6 +124,7 @@ internal static class UiTests
         {
             string fixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
+            CheckNowDoingWindow();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var snapshots=new SnapshotServer("AIUsageManager.UiTests."+Guid.NewGuid().ToString("N")))
