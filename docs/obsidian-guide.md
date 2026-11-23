@@ -27,12 +27,14 @@
 
 ### Claudian に送る（「いまやってること」キーの Ctrl+Enter）
 
-Stream Deck の「いまやってること」の窓で Ctrl+Enter を押すと、日誌に書いたあと、同じ文を Claudian（Obsidian の中で Claude Code を使うプラグイン）のチャットに新しいメッセージとして送ります。`settings.ini` に `now_doing_claudian=on` を書いたときだけ使えます（[Stream Deck のガイド](streamdeck-guide.md)）。
+Stream Deck の「いまやってること」の窓で Ctrl+Enter を押すと、入れた文の1行目を日誌に書いたあと、全文を Claudian（Obsidian の中で Claude Code を使うプラグイン）のチャットに新しいメッセージとして送ります。複数行の長い文（4000文字まで）も送れます。`settings.ini` に `now_doing_claudian=on` を書いたときだけ使えます（[Stream Deck のガイド](streamdeck-guide.md)）。このプラグインの 1.3.0 以降が要ります。
 
+- 送る前に、窓が書いた日誌を、今のタブで開きます。開くのは、その日誌がこの保管庫（Vault）の中のファイルのときだけです。保管庫の外のファイルや、見つからないときは、開かずに送ります。
 - 送り先は、Claudian のチャットで開いているタブです。チャットが閉じていれば開きます。Obsidian が前に出ます。
+- 受け取る文は4000文字までです。それより長いものは送りません。
 - Claudian が見つからないときや、受け取れないときは、Obsidian の右上に理由を出します。
 - Claudian には外から文を受け取る仕組みがないため、Claudian 自身の Enter キーと同じ部分を使って送ります。Claudian を更新すると送れなくなることがあります（そのときは「Claudian の版が変わった可能性があります」と出ます）。Claudian 1.3.64 の作りに合わせています。
-- このプラグインは `obsidian://ai-usage-manager-claudian` で始まるリンクを受け付けます。リンクには1回だけ使える合言葉しか入っておらず、文そのものは窓が `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、このプラグインが受け取ると消します。合言葉が合わないリンク（Web ページやノートに書かれたものなど）では何も送りません。受け取られなかったファイルは、次に窓を開いたとき、2分を過ぎていれば窓が消します。
+- このプラグインは `obsidian://ai-usage-manager-claudian` で始まるリンクを受け付けます。リンクには1回だけ使える合言葉しか入っておらず、文そのもの（と書いた日誌の場所）は窓が `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、このプラグインが受け取ると消します。合言葉が合わないリンク（Web ページやノートに書かれたものなど）では何も送りません。受け取られなかったファイルは、次に窓を開いたとき、2分を過ぎていれば窓が消します。
 
 ## 必要なもの
 
