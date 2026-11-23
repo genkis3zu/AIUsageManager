@@ -107,7 +107,9 @@ namespace AIUsageManager
             try
             {
                 string path = Field.Replace(pattern, m => date.ToString(m.Groups[1].Value, CultureInfo.InvariantCulture));
-                if (!Path.IsPathRooted(path) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return null;
+                // Only a full path: a drive with a separator (C:\…) or a network share (\\server\…), not C:notes or \notes.
+                bool full = (path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) || path.StartsWith(@"\\", StringComparison.Ordinal);
+                if (!full || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return null;
                 foreach (string part in path.Substring(Path.GetPathRoot(path).Length).Split('\\', '/'))
                     if (part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
                 if (Path.GetFileName(path).Length == 0) return null;
@@ -147,17 +149,37 @@ namespace AIUsageManager
             return n > 0 && n < line.Length && line[n] == ' ' ? n : 0;
         }
 
+        // Lines of fenced code blocks (``` or ~~~, fence lines included) are text, not headings or records: a `# comment`
+        // in a shell snippet must not end the section. A fence that is never closed does not count.
+        static bool[] Fenced(List<Line> lines)
+        {
+            var inside = new bool[lines.Count];
+            int open = -1;
+            string marker = null;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                string text = lines[i].Text.TrimStart(' ');
+                if (open < 0) { if (text.StartsWith("```", StringComparison.Ordinal) || text.StartsWith("~~~", StringComparison.Ordinal)) { open = i; marker = text.Substring(0, 3); } }
+                else if (text.StartsWith(marker, StringComparison.Ordinal)) { for (int j = open; j <= i; j++) inside[j] = true; open = -1; }
+            }
+            return inside;
+        }
+
         // The heading line and the line after the section. The section ends before the next heading of the same or a
         // higher level (for `## 📝 日中ログ`, the next `# ` or `## ` line) or the configured end line, whichever comes first.
-        static bool Section(List<Line> lines, NowDoingSettings settings, out int heading, out int end)
+        static bool Section(List<Line> lines, NowDoingSettings settings, out int heading, out int end, out bool[] fenced)
         {
-            heading = lines.FindIndex(l => l.Text == settings.Heading);
+            bool[] code = Fenced(lines);
+            fenced = code;
+            heading = -1;
+            for (int i = 0; i < lines.Count; i++) if (!code[i] && lines[i].Text == settings.Heading) { heading = i; break; }
             end = lines.Count;
             if (heading < 0) return false;
             int level = Level(settings.Heading);
             if (level == 0) level = 2;
             for (int i = heading + 1; i < lines.Count; i++)
             {
+                if (code[i]) continue;
                 int other = Level(lines[i].Text);
                 if ((other > 0 && other <= level) || (!string.IsNullOrEmpty(settings.Before) && lines[i].Text.StartsWith(settings.Before, StringComparison.Ordinal))) { end = i; break; }
             }
@@ -171,10 +193,12 @@ namespace AIUsageManager
             failure = NowDoingFailure.None;
             List<Line> lines = Split(content ?? "");
             int heading, end;
-            if (!Section(lines, settings, out heading, out end)) { failure = NowDoingFailure.NoHeading; return null; }
+            bool[] fenced;
+            if (!Section(lines, settings, out heading, out end, out fenced)) { failure = NowDoingFailure.NoHeading; return null; }
             var records = new List<NowDoingRecord>();
             for (int i = heading + 1; i < end; i++)
             {
+                if (fenced[i]) continue;
                 Match m = Stamp.Match(lines[i].Text);
                 if (!m.Success) continue;
                 string rest = m.Groups[2].Value;
@@ -191,11 +215,13 @@ namespace AIUsageManager
             failure = NowDoingFailure.None;
             List<Line> lines = Split(content ?? "");
             int heading, end;
-            if (!Section(lines, settings, out heading, out end)) { failure = NowDoingFailure.NoHeading; return null; }
+            bool[] fenced;
+            if (!Section(lines, settings, out heading, out end, out fenced)) { failure = NowDoingFailure.NoHeading; return null; }
             // Before the first record that starts later than this one; a record at the same minute stays above.
             int minutes = time.Hour * 60 + time.Minute, next = end;
             for (int i = heading + 1; i < end; i++)
             {
+                if (fenced[i]) continue;
                 Match m = Record.Match(lines[i].Text);
                 if (m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * 60 + int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) > minutes) { next = i; break; }
             }

@@ -238,6 +238,22 @@ internal static partial class Tests
             string inner = Lines("## 📝 日中ログ", "", "[09:00]", "#タグ", "### 午前", "[11:00]", "昼前", "", "## 次");
             Assert(AddAt(inner, 10, 0, "x", new NowDoingSettings()) == Lines("## 📝 日中ログ", "", "[09:00]", "#タグ", "### 午前", "", "[10:00]", "📝 x", "", "[11:00]", "昼前", "", "## 次"));
         });
+        Check("Headings and records inside fenced code blocks are text", () => {
+            string code = Lines("## 📝 日中ログ", "", "[10:00]", "setup", "```bash", "# install", "[12:00] ログの行", "npm i", "```", "", "## Next");
+            Assert(AddAt(code, 11, 0, "x", new NowDoingSettings()) == Lines("## 📝 日中ログ", "", "[10:00]", "setup", "```bash", "# install", "[12:00] ログの行", "npm i", "```", "", "[11:00]", "📝 x", "", "## Next"));
+            string tilde = Lines("~~~", "## 📝 日中ログ", "~~~", "## 📝 日中ログ", "", "[09:00]", "朝", "", "~~~", "[09:30]", "📝 コードの中", "~~~", "", "## 次");
+            NowDoingFailure failure;
+            Assert(Shown(NowDoingNote.Records(tilde + "", new NowDoingSettings(), out failure)) == "" && failure == NowDoingFailure.None);
+            Assert(AddAt(tilde, 10, 0, "x", new NowDoingSettings()) == tilde.Replace("~~~\n\n## 次", "~~~\n\n[10:00]\n📝 x\n\n## 次"));
+            // A fence that is never closed does not count.
+            string open = Lines("## 📝 日中ログ", "", "[09:00]", "```", "", "## 次");
+            Assert(AddAt(open, 10, 0, "x", new NowDoingSettings()) == Lines("## 📝 日中ログ", "", "[09:00]", "```", "", "[10:00]", "📝 x", "", "## 次"));
+        });
+        Check("Only full paths are accepted for the diary", () => {
+            var day = new DateTime(2026, 11, 24);
+            Assert(NowDoingNote.NotePath(@"C:notes\{yyyy}.md", day) == null && NowDoingNote.NotePath(@"\notes\{yyyy}.md", day) == null);
+            Assert(NowDoingNote.NotePath(@"\\server\share\{yyyy}.md", day) == @"\\server\share\2026.md" && NowDoingNote.NotePath(@"D:/notes/{yyyy}.md", day) == @"D:/notes/2026.md");
+        });
         Check("New lines take the line break of the lines around them", () => {
             string mixed = "---\ntags: [x]\n---\r\n## 📝 日中ログ\r\n\r\n[09:00]\r\n朝\r\n\r\n## 次\r\n";
             Assert(AddAt(mixed, 10, 0, "x", new NowDoingSettings()) == mixed.Replace("朝\r\n\r\n## 次", "朝\r\n\r\n[10:00]\r\n📝 x\r\n\r\n## 次"));
