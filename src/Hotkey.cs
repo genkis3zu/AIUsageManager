@@ -12,12 +12,20 @@ namespace AIUsageManager
         public int Modifiers;
         public Keys Key;
         public string Text;
+        // DoubleCtrl, DoubleLeftCtrl, DoubleRightCtrl, DoubleShift, DoubleLeftShift or DoubleRightShift: the key pressed
+        // twice opens the window (found by a keyboard hook, not registered with Windows). None for Ctrl+Alt+N and the like.
+        public DoubleTapKey Double;
 
-        // At least one of Ctrl, Alt or Win (Shift alone would take a key away from typing) and one key:
-        // A–Z, 0–9, F1–F24 or Space. Null when the text is not like that.
+        static readonly string[] DoubleNames = { "DoubleCtrl", "DoubleLeftCtrl", "DoubleRightCtrl", "DoubleShift", "DoubleLeftShift", "DoubleRightShift" };
+        static readonly DoubleTapKey[] DoubleKeys = { DoubleTapKey.Ctrl, DoubleTapKey.LeftCtrl, DoubleTapKey.RightCtrl, DoubleTapKey.Shift, DoubleTapKey.LeftShift, DoubleTapKey.RightShift };
+
+        // One of the six double presses, or at least one of Ctrl, Alt or Win (Shift alone would take a key away from
+        // typing) and one key: A–Z, 0–9, F1–F24 or Space. Null when the text is not like that.
         public static NowDoingHotkey Parse(string text)
         {
             if (string.IsNullOrWhiteSpace(text)) return null;
+            for (int i = 0; i < DoubleNames.Length; i++)
+                if (string.Equals(text.Trim(), DoubleNames[i], StringComparison.OrdinalIgnoreCase)) return new NowDoingHotkey { Double = DoubleKeys[i], Key = Keys.None, Text = text.Trim() };
             int modifiers = 0;
             Keys key = Keys.None;
             foreach (string raw in text.Split('+'))
@@ -47,7 +55,8 @@ namespace AIUsageManager
         public static string Problem(string text, NowDoingHotkey parsed, bool registered)
         {
             if (string.IsNullOrWhiteSpace(text)) return null;
-            if (parsed == null) return "settings.ini の now_doing_hotkey「" + text.Trim() + "」の書き方が違います（例: Ctrl+Alt+N）";
+            if (parsed == null) return "settings.ini の now_doing_hotkey「" + text.Trim() + "」の書き方が違います（例: Ctrl+Alt+N、DoubleCtrl）";
+            if (!registered && parsed.Double != DoubleTapKey.None) return "「" + parsed.Text + "」を使えませんでした（キーボードの入力を受け取れません）";
             if (!registered) return "ショートカット「" + parsed.Text + "」は、ほかのアプリが使っているため使えません";
             return null;
         }

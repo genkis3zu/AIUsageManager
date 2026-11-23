@@ -136,8 +136,64 @@ internal static partial class Tests
         });
     }
 
+    // Feeds key events to a detector: L/R = left/right Ctrl, S/T = left/right Shift, X = any other key; + is down,
+    // - is up, the number is the time in milliseconds. Returns how many double presses were found.
+    static int Taps(DoubleTapKey key, string events)
+    {
+        var detector = new DoubleTapDetector(key);
+        int found = 0;
+        foreach (string e in events.Split(' '))
+        {
+            TapKey k = e[0] == 'L' ? TapKey.LeftCtrl : e[0] == 'R' ? TapKey.RightCtrl : e[0] == 'S' ? TapKey.LeftShift : e[0] == 'T' ? TapKey.RightShift : TapKey.Other;
+            if (detector.Observe(k, e[1] == '+', uint.Parse(e.Substring(2), CultureInfo.InvariantCulture))) found++;
+        }
+        return found;
+    }
+
+    static void RunDoubleTapTests()
+    {
+        Check("Each double-press setting finds its own key pressed twice", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 L+500 L-600") == 1 && Taps(DoubleTapKey.LeftCtrl, "L+0 L-100 L+500 L-600") == 1);
+            Assert(Taps(DoubleTapKey.RightCtrl, "R+0 R-100 R+500 R-600") == 1);
+            Assert(Taps(DoubleTapKey.Shift, "S+0 S-100 S+500 S-600") == 1 && Taps(DoubleTapKey.LeftShift, "S+0 S-100 S+500 S-600") == 1);
+            Assert(Taps(DoubleTapKey.RightShift, "T+0 T-100 T+500 T-600") == 1 && Taps(DoubleTapKey.Shift, "T+0 T-100 T+500 T-600") == 1);
+            Assert(Taps(DoubleTapKey.Ctrl, "S+0 S-100 S+500 S-600") == 0 && Taps(DoubleTapKey.Shift, "L+0 L-100 L+500 L-600") == 0 && Taps(DoubleTapKey.None, "L+0 L-100 L+500 L-600") == 0);
+        });
+        Check("Presses up to 300 ms and a gap up to 400 ms count", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-300 L+700 L-1000") == 1);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-301 L+701 L-801") == 0);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 L+200 L-501") == 0);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 L+501 L-600") == 0);
+        });
+        Check("Another key in between or while held starts again", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 X+200 L+300 L-400") == 0);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 X+50 L-100 L+200 L-300 L+400 L-500") == 1);
+            Assert(Taps(DoubleTapKey.Shift, "S+0 X+20 S-60 S+100 S-150") == 0);
+            // Letting go of another key is not pressing one.
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 X-150 L+200 L-300") == 1);
+        });
+        Check("Key repeat while held counts as one press", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L+30 L+60 L-100 L+300 L+330 L-400") == 1);
+        });
+        Check("Left and right are told apart only when the setting says so", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-100 R+200 R-300") == 1);
+            Assert(Taps(DoubleTapKey.LeftCtrl, "L+0 L-100 R+200 R-300") == 0 && Taps(DoubleTapKey.LeftCtrl, "R+0 R-100 R+200 R-300") == 0);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 R+50 R-80 L-100 L+200 L-300") == 0);
+        });
+        Check("Three presses find it once, and the clock wrapping around does not matter", () => {
+            Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-50 L+100 L-150 L+200 L-250") == 1);
+            Assert(Taps(DoubleTapKey.Ctrl, "L+4294967200 L-4294967250 L+4294967290 L-44") == 1);
+        });
+        Check("Only the left and right Ctrl and Shift keys are told apart", () => {
+            Assert(DoubleTapHook.Classify(0xA2) == TapKey.LeftCtrl && DoubleTapHook.Classify(0xA3) == TapKey.RightCtrl);
+            Assert(DoubleTapHook.Classify(0xA0) == TapKey.LeftShift && DoubleTapHook.Classify(0xA1) == TapKey.RightShift);
+            Assert(DoubleTapHook.Classify(0x41) == TapKey.Other && DoubleTapHook.Classify(0x11) == TapKey.Other && DoubleTapHook.Classify(0x12) == TapKey.Other && DoubleTapHook.Classify(0xA4) == TapKey.Other);
+        });
+    }
+
     static void RunNowDoingActionTests()
     {
+        RunDoubleTapTests();
         RunNowDoingScriptTests();
         Check("Buttons are read in their three forms", () => {
             NowDoingButton b = NowDoingButton.Parse(1, "🚶 散歩|record:🚶 散歩 ✅");

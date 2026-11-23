@@ -98,6 +98,32 @@ internal static class UiTests
             Assert(presses==1,"Another shortcut key message does nothing");
         }
         using(var again=new HotkeyWindow(key,()=>{}))Assert(again.Registered,"Closing gives the shortcut key back to Windows");
+        var hook=new DoubleTapHook(DoubleTapKey.RightShift,()=>{});
+        Assert(hook.Installed,"The keyboard hook for a double press is installed");
+        hook.Dispose();
+        Assert(!hook.Installed,"Closing removes the keyboard hook");
+        using(var again=new DoubleTapHook(DoubleTapKey.RightShift,()=>{}))Assert(again.Installed,"The keyboard hook can be installed again");
+        string hookFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(hookFixture);
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoingHotkey:"DoubleRightShift");
+            var tap=Field<DoubleTapHook>(tray,"nowDoingTap");
+            Assert(tap!=null&&tap.Installed&&Field<HotkeyWindow>(tray,"nowDoingKey")==null,"now_doing_hotkey=DoubleRightShift installs the keyboard hook instead of registering a shortcut key");
+            tray.ExitThread();
+            Assert(!tap.Installed,"The tray app removes the keyboard hook when it exits");
+        }
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoingHotkey:"Ctrl+Alt+Shift+F23");
+            Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey").Registered,"A shortcut key setting installs no keyboard hook");
+            tray.ExitThread();
+        }
+        using(var shown=new NowDoingForm(DateTime.Now,TodayView(),Actions(new List<string>(),null),ThemePalette.Light))
+        {
+            shown.Show();Application.DoEvents();
+            string method=ForegroundWindow.Bring(shown.Handle,false);
+            Assert(method=="SetForegroundWindow"||method=="AttachThreadInput"||method=="none","Bringing the window to the front without a key says how it went");
+        }
         using(var popup=new PopupForm())
         {
             popup.SetWaiting(new WaitingList{Items=new[]{new WaitingItem{Key="Claude/q",Service="Claude",Place="P",App="claude",Reason=WaitReason.Question,Since=DateTimeOffset.Now}}},DateTimeOffset.Now);

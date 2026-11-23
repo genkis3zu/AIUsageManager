@@ -123,10 +123,13 @@ namespace AIUsageManager
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("終了",null,(s,e)=>ExitThread());
             ApplyTheme();
-            // The shortcut key for the いまやってること window (now_doing_hotkey in settings.ini).
+            // The shortcut key for the いまやってること window (now_doing_hotkey in settings.ini): a key registered with
+            // Windows, or a double press of Ctrl or Shift found by a keyboard hook while the tray app runs.
             NowDoingHotkey hotkey=NowDoingHotkey.Parse(nowDoingHotkey);
-            if(hotkey!=null)nowDoingKey=new HotkeyWindow(hotkey,OpenNowDoing);
-            string hotkeyProblem=NowDoingHotkey.Problem(nowDoingHotkey,hotkey,nowDoingKey!=null&&nowDoingKey.Registered);
+            bool hotkeyReady=false;
+            if(hotkey!=null&&hotkey.Double!=DoubleTapKey.None) {nowDoingTap=new DoubleTapHook(hotkey.Double,()=>OpenNowDoing(true));hotkeyReady=nowDoingTap.Installed;}
+            else if(hotkey!=null) {nowDoingKey=new HotkeyWindow(hotkey,()=>OpenNowDoing(false));hotkeyReady=nowDoingKey.Registered;}
+            string hotkeyProblem=NowDoingHotkey.Problem(nowDoingHotkey,hotkey,hotkeyReady);
             if(hotkeyProblem!=null)tray.ShowBalloonTip(8000,"いまやってること",hotkeyProblem,ToolTipIcon.Warning);
             menu.Opening+=(s,e)=> {
                 ApplyTheme();
@@ -305,13 +308,16 @@ namespace AIUsageManager
         }
         void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus,latestWaiting)); }
         HotkeyWindow nowDoingKey;
+        DoubleTapHook nowDoingTap;
         // Opens the いまやってること window as its own process, the same way the Stream Deck key does. Windows lets the
-        // app that got the shortcut key bring a window to the front, and this passes that on to the new process.
-        void OpenNowDoing()
+        // app that got the shortcut key bring a window to the front, and this passes that on to the new process. A double
+        // press gives no such permission, so that window is told it may send one unused key to come to the front.
+        void OpenNowDoing(bool doublePress)
         {
+            if(exiting)return;
             try
             {
-                using(var process=Process.Start(new ProcessStartInfo(Application.ExecutablePath,NowDoingNote.Argument){UseShellExecute=false}))
+                using(var process=Process.Start(new ProcessStartInfo(Application.ExecutablePath,doublePress?NowDoingNote.TapArgument:NowDoingNote.Argument){UseShellExecute=false}))
                     if(process!=null)AllowSetForegroundWindow(process.Id);
             }
             catch(System.ComponentModel.Win32Exception) { tray.ShowBalloonTip(4000,"いまやってること","窓を開けませんでした。",ToolTipIcon.Warning); }
@@ -322,6 +328,7 @@ namespace AIUsageManager
         {
             if(exiting)return;exiting=true;
             if(nowDoingKey!=null){nowDoingKey.Dispose();nowDoingKey=null;}
+            if(nowDoingTap!=null)nowDoingTap.Dispose();
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
             refreshTimer.Stop();displayTimer.Stop();waitingTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
             if(refreshWait!=null)refreshWait.Unregister(null);

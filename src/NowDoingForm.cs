@@ -263,7 +263,15 @@ namespace AIUsageManager
         protected override void OnLoad(EventArgs e) { Arrange(); base.OnLoad(e); }
         // Moving to a screen with another scale lays the window out again for it.
         protected override void OnDpiChanged(DpiChangedEventArgs e) { base.OnDpiChanged(e); Arrange(); Invalidate(); }
-        protected override void OnShown(EventArgs e) { base.OnShown(e); placed = true; Activate(); input.Focus(); FitLines(); ReadTodo(); }
+        // True when the tray app opened the window for a double press of Ctrl or Shift.
+        public bool OpenedByDoublePress { get; set; }
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            placed = true;
+            ForegroundWindow.Bring(Handle, OpenedByDoublePress);
+            input.Focus(); FitLines(); ReadTodo();
+        }
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             // A list script that has not finished is stopped (with what it started), not left running.
@@ -525,8 +533,9 @@ namespace AIUsageManager
             catch (ExternalException) { return false; }
         }
 
-        // Runs `AIUsageManager.exe --now-doing`: one window at a time per user, separate from the tray app.
-        public static void Run()
+        // Runs `AIUsageManager.exe --now-doing` (or `--now-doing-tap` from a double press): one window at a time per user,
+        // separate from the tray app.
+        public static void Run(bool doublePress)
         {
             string user;
             using (var identity = WindowsIdentity.GetCurrent()) user = identity.User.Value;
@@ -572,7 +581,7 @@ namespace AIUsageManager
                             workdir, NowDoingScriptLimits.After, CancellationToken.None);
                     }
                     Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-                    Application.Run(new NowDoingForm(openedAt, view, actions, ThemePalette.Resolve(themes.Load())));
+                    Application.Run(new NowDoingForm(openedAt, view, actions, ThemePalette.Resolve(themes.Load())) { OpenedByDoublePress = doublePress });
                 }
                 finally { mutex.ReleaseMutex(); }
             }

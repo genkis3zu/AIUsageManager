@@ -246,9 +246,25 @@ internal static partial class Tests
         });
         Check("The tray says when the shortcut key is written wrongly or taken by another app", () => {
             Assert(NowDoingHotkey.Problem(null, null, false) == null && NowDoingHotkey.Problem("  ", null, false) == null);
-            Assert(NowDoingHotkey.Problem("Shift+N", null, false) == "settings.ini の now_doing_hotkey「Shift+N」の書き方が違います（例: Ctrl+Alt+N）");
+            Assert(NowDoingHotkey.Problem("Shift+N", null, false) == "settings.ini の now_doing_hotkey「Shift+N」の書き方が違います（例: Ctrl+Alt+N、DoubleCtrl）");
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), false) == "ショートカット「Ctrl+Alt+N」は、ほかのアプリが使っているため使えません");
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), true) == null);
+        });
+        Check("Double-press settings are read, and Alt or Win double presses are not", () => {
+            var cases = new System.Collections.Generic.Dictionary<string, DoubleTapKey> {
+                { "DoubleCtrl", DoubleTapKey.Ctrl }, { "DoubleLeftCtrl", DoubleTapKey.LeftCtrl }, { "DoubleRightCtrl", DoubleTapKey.RightCtrl },
+                { "DoubleShift", DoubleTapKey.Shift }, { "doubleshift", DoubleTapKey.Shift }, { "DoubleLeftShift", DoubleTapKey.LeftShift }, { "DoubleRightShift", DoubleTapKey.RightShift } };
+            foreach (var c in cases)
+            {
+                NowDoingHotkey k = NowDoingHotkey.Parse(" " + c.Key + " ");
+                Assert(k != null && k.Double == c.Value && k.Modifiers == 0 && k.Key == System.Windows.Forms.Keys.None && k.Text == c.Key);
+            }
+            foreach (string bad in new[] { "DoubleAlt", "DoubleWin", "Double", "DoubleCtrl+N", "Ctrl+DoubleCtrl" })
+                Assert(NowDoingHotkey.Parse(bad) == null && NowDoingHotkey.Problem(bad, null, false).Contains("DoubleCtrl"));
+            Assert(NowDoingHotkey.Problem("DoubleCtrl", NowDoingHotkey.Parse("DoubleCtrl"), false) == "「DoubleCtrl」を使えませんでした（キーボードの入力を受け取れません）");
+            Assert(NowDoingHotkey.Problem("DoubleCtrl", NowDoingHotkey.Parse("DoubleCtrl"), true) == null);
+            Assert(NowDoingHotkey.Parse("Ctrl+Alt+N").Double == DoubleTapKey.None);
+            Assert(NowDoingNote.TapArgument == "--now-doing-tap");
         });
         Check("A date format or name that makes an unusable path is a bad setting, not a crash", () => {
             var day = new DateTime(2026, 11, 24, 10, 40, 0);

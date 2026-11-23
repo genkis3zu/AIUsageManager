@@ -107,6 +107,8 @@ namespace AIUsageManager
     internal static class NowDoingNote
     {
         public const string Argument = "--now-doing";
+        // The same window, opened by the tray app's double press: it may send one unused key to come to the front.
+        public const string TapArgument = "--now-doing-tap";
         public const int MaxLength = 200;
         // Ctrl+Enter: the whole text goes to Claudian (at most 4000 characters) and the 日中ログ gets the first 80.
         public const int MaxSendLength = 4000, SendHeadLength = 80;
