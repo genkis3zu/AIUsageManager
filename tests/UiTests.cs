@@ -329,7 +329,10 @@ internal static class UiTests
             Assert(form.Visible&&form.Status=="日誌には書きました。そのあとの処理に失敗しました: 見出しが見つかりません"&&form.StatusIsFailure&&form.Input==""&&written.Count==5&&!form.Busy,"A failed after script keeps the window, empties the box and says the diary was written");
             SaveNowDoing(form,"now-doing-after-failed-light.png");
             form.Input="送る";form.Press(Keys.Control|Keys.Enter);
-            Assert(form.Visible&&sent.Count==3&&sent[2]=="送る"&&form.Status==NowDoingForm.AfterFailed("見出しが見つかりません"),"Ctrl+Enter still sends when the after script fails");
+            Assert(form.Visible&&sent.Count==3&&sent[2]=="送る"&&form.StatusIsFailure,"Ctrl+Enter still sends when the after script fails");
+            // The window stays in front of Obsidian, so it must say the text did go to Claudian.
+            Assert(form.Status=="日誌に書き、Claudian に送りました。そのあとの処理に失敗しました: 見出しが見つかりません","When the after script fails after sending, the window says the text was sent to Claudian");
+            SaveNowDoing(form,"now-doing-sent-after-failed-light.png");
         }
     }
     static NowDoingButton[] Buttons(params string[] values)

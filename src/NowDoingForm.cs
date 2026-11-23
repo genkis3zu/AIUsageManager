@@ -74,6 +74,8 @@ namespace AIUsageManager
         public const string TooLongToSend = "4000文字までです";
         public const string Working = "日誌に書きました。そのあとの処理をしています…";
         public static string AfterFailed(string reason) { return "日誌には書きました。そのあとの処理に失敗しました: " + reason; }
+        // Ctrl+Enter: the window stays in front of Obsidian, so it says the text did go to Claudian.
+        public static string SentAfterFailed(string reason) { return "日誌に書き、Claudian に送りました。そのあとの処理に失敗しました: " + reason; }
         public const string CopyWorking = "命令を実行しています…";
         public const string Copied = "クリップボードに入れました";
         public const string ClipboardBusy = "クリップボードに入れられませんでした";
@@ -516,7 +518,8 @@ namespace AIUsageManager
                 if (IsDisposed) return;
             }
             bool sent = sendText == null || actions.Send(sendText);
-            string problem = !sent ? ClaudianFailed : result != null && !result.Ok ? AfterFailed(result.Reason) : null;
+            string problem = !sent ? ClaudianFailed
+                : result != null && !result.Ok ? (sendText != null ? SentAfterFailed(result.Reason) : AfterFailed(result.Reason)) : null;
             if (problem != null)
             {
                 // It is in the diary already, so the box is emptied and another Enter cannot write it twice.
