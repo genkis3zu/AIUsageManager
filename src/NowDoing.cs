@@ -131,11 +131,11 @@ namespace AIUsageManager
             }
         }
 
-        // Line breaks and tabs become one space each, outer spaces go, and at most 200 characters remain.
-        public static string Clean(string text)
+        // Line breaks and tabs become one space each, outer spaces go, and at most `max` (200) characters remain.
+        public static string Clean(string text, int max = MaxLength)
         {
             string value = (text ?? "").Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Trim();
-            if (value.Length > MaxLength) value = value.Substring(0, char.IsHighSurrogate(value[MaxLength - 1]) ? MaxLength - 1 : MaxLength).TrimEnd();
+            if (value.Length > max) value = value.Substring(0, char.IsHighSurrogate(value[max - 1]) ? max - 1 : max).TrimEnd();
             return value;
         }
 

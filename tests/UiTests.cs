@@ -114,7 +114,6 @@ internal static class UiTests
         string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"screenshots");Directory.CreateDirectory(output);
         using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(Path.Combine(output,name),ImageFormat.Png);}
     }
-    [STAThread]
     static void CheckNowDoingWindow()
     {
         var written=new List<string>();var results=new Queue<NowDoingFailure>(new[]{NowDoingFailure.Busy,NowDoingFailure.None});
@@ -125,10 +124,10 @@ internal static class UiTests
         using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
         {
             form.Show();Application.DoEvents();
-            Assert(form.TopMost&&form.FormBorderStyle==FormBorderStyle.None&&form.Status=="Enter で日誌へ ／ Esc でやめる"&&!form.StatusIsFailure,"The いまやってること window is on top and says the keys");
+            Assert(form.TopMost&&form.FormBorderStyle==FormBorderStyle.None&&form.Status=="Enter で日誌へ ／ Shift+Enter で改行 ／ Esc でやめる"&&!form.StatusIsFailure,"The いまやってること window is on top and says the keys");
             Assert(form.Page=="2026-11-24 - 日誌  ›  📝 日中ログ"&&form.Folder==@"C:\Notes\2026年_日誌","The いまやってること window shows the page, the section and the folder it writes to");
             Assert(form.ShownRecords.Count==NowDoingForm.MaxShown&&form.ShownRecords[0].Text==samples[7]&&form.ShownRecords[5].Text==samples[2],"The いまやってること window lists today's records, newest first, at most six");
-            Assert(Field<TextBox>(form,"input").MaxLength==200,"The いまやってること box takes at most 200 characters");
+            Assert(Field<TextBox>(form,"input").MaxLength==32767&&Field<TextBox>(form,"input").Multiline,"The いまやってること box takes several lines and long texts (the limits are checked on Enter and Ctrl+Enter)");
             SaveNowDoing(form,"now-doing-light.png");
             form.Input="  見積の表\tを直している ";form.Submit();
             Assert(form.Visible&&form.Input=="  見積の表\tを直している "&&form.Status=="日誌が使用中です。もう一度 Enter を押してください"&&form.StatusIsFailure,"A failed write keeps the window and the text, and shows the reason in red");
@@ -171,7 +170,7 @@ internal static class UiTests
         using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return true;}))
         {
             form.Show();Application.DoEvents();
-            Assert(form.Status=="Enter で日誌へ ／ Ctrl+Enter で日誌と Claudian へ ／ Esc でやめる","With Claudian on, the window says Ctrl+Enter also sends to Claudian");
+            Assert(form.Status=="Enter で日誌へ ／ Ctrl+Enter で Claudian へも ／ Shift+Enter で改行","With Claudian on, the window says Ctrl+Enter also sends to Claudian");
             SaveNowDoing(form,"now-doing-claudian-light.png");
             form.Input="見積";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
             Assert(!form.Visible&&written.Count==3&&written[2]=="見積"&&sent.Count==1&&sent[0]=="見積","Ctrl+Enter writes the line to the diary, then hands it to Claudian and closes");
@@ -197,6 +196,86 @@ internal static class UiTests
             Assert(!form.Visible&&written[written.Count-1]=="y"&&sent.Count==2,"Without the setting Ctrl+Enter only writes to the diary");
         }
     }
+    // The window's actions for the tests: writing records the line, sending (when given) records the text.
+    static NowDoingActions Actions(List<string> written,List<string> sent,Func<string,string,Task<NowDoingScriptResult>> after=null)
+    {
+        return new NowDoingActions{Write=t=>{written.Add(t);return NowDoingFailure.None;},Describe=f=>NowDoingNote.Message(f,null),
+            Send=sent==null?null:(Func<string,bool>)(t=>{sent.Add(t);return true;}),After=after,ShowOutputMs=50};
+    }
+    static Task<NowDoingScriptResult> Result(bool ok,string output,string reason=null)
+    {
+        var done=new TaskCompletionSource<NowDoingScriptResult>();done.SetResult(new NowDoingScriptResult{Ok=ok,Output=output??"",Reason=reason});return done.Task;
+    }
+    static NowDoingView TodayView()
+    {
+        var view=new NowDoingView{Path=@"C:\Notes\2026年_日誌\2026-11-24 - 日誌.md",Heading="## 📝 日中ログ"};
+        view.Records.Add(new NowDoingRecord{Time="09:00",Text="メールの返信"});view.Records.Add(new NowDoingRecord{Time="10:30",Text="見積の表を直している"});
+        return view;
+    }
+    static void CheckNowDoingInput()
+    {
+        var opened=new DateTime(2026,11,24,11,5,0);var view=TodayView();
+        var written=new List<string>();var sent=new List<string>();var calls=new List<string>();
+        using(var form=new NowDoingForm(opened,view,Actions(written,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            var box=Field<TextBox>(form,"input");int one=form.ClientSize.Height;
+            form.Input="a";box.SelectionStart=1;form.Press(Keys.Shift|Keys.Enter);
+            Assert(form.Input=="a\r\n"&&form.InputLines==2&&form.Visible&&written.Count==0,"Shift+Enter starts a new line in the いまやってること box");
+            form.Input="一\r\n二\r\n三";Application.DoEvents();
+            Assert(form.InputLines==3&&form.ClientSize.Height>one,"The いまやってること box grows with its lines");
+            SaveNowDoing(form,"now-doing-multiline-light.png");
+            form.Input=string.Join("\r\n",Enumerable.Range(1,10));Application.DoEvents();
+            Assert(form.InputLines==6&&box.ScrollBars==ScrollBars.Vertical,"The box grows to six lines at most and scrolls after that");
+            form.Input="";Clipboard.SetText("一\n二\r\n三");SendMessage(box.Handle,0x302,IntPtr.Zero,IntPtr.Zero);
+            Assert(form.Input=="一\r\n二\r\n三","Pasted text keeps its line breaks, also when they are LF only");
+            form.Press(Keys.Control|Keys.A);
+            Assert(box.SelectionLength==box.TextLength,"Ctrl+A selects the whole box");
+            form.Input="a\r\nb";form.Press(Keys.Enter);
+            Assert(!form.Visible&&written.Count==1&&written[0]=="a b","Enter writes the lines of the box as one line");
+        }
+        using(var form=new NowDoingForm(opened,view,Actions(written,sent),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Input=new string('あ',201);form.Press(Keys.Enter);
+            Assert(form.Visible&&form.Status==NowDoingForm.TooLongToRecord&&form.StatusIsFailure&&form.Input.Length==201&&written.Count==1,"More than 200 characters is not written with Enter, and the text stays");
+            form.Input=new string('a',4001);form.Press(Keys.Control|Keys.Enter);
+            Assert(form.Visible&&form.Status==NowDoingForm.TooLongToSend&&form.StatusIsFailure&&written.Count==1&&sent.Count==0,"More than 4000 characters is neither written nor sent");
+            form.Input="一行目\r\n二行目\r\n三行目";form.Press(Keys.Control|Keys.Enter);
+            Assert(!form.Visible&&written[1]=="一行目（Claudian へ・3行）"&&sent.Count==1&&sent[0]=="一行目\n二行目\n三行目","Ctrl+Enter writes the first line and sends the whole text");
+        }
+        Func<string,string,Task<NowDoingScriptResult>> shows=(mode,text)=>{calls.Add(mode+"|"+text);return Result(true,"🚶 散歩 ✅\n2行目");};
+        using(var form=new NowDoingForm(opened,view,Actions(written,null,shows),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Input="🚶 散歩";form.Press(Keys.Enter);
+            Assert(calls.Count==1&&calls[0]=="record|🚶 散歩"&&written[2]=="🚶 散歩","The after script gets record and the written text");
+            Assert(form.Visible&&form.Status=="🚶 散歩 ✅"&&!form.StatusIsFailure,"The first line of the after script shows in the window");
+            Assert(Pump(()=>!form.Visible),"The window closes after showing the after script's line");
+        }
+        var pending=new TaskCompletionSource<NowDoingScriptResult>();
+        using(var form=new NowDoingForm(opened,view,Actions(written,sent,(mode,text)=>{calls.Add(mode+"|"+text);return pending.Task;}),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Input="質問です\r\n続き";form.Press(Keys.Control|Keys.Enter);
+            Assert(form.Busy&&form.Status==NowDoingForm.Working&&sent.Count==1&&calls[1]=="send|質問です\n続き"&&written[3]=="質問です（Claudian へ・2行）","Ctrl+Enter runs the after script with send and the whole text, and waits for it");
+            form.Press(Keys.Escape);form.Press(Keys.Enter);Application.DoEvents();
+            Assert(form.Visible&&written.Count==4,"While the after script runs the window takes no keys");
+            pending.SetResult(new NowDoingScriptResult{Ok=true,Output=""});
+            Assert(Pump(()=>!form.Visible)&&sent.Count==2&&sent[1]=="質問です\n続き","Ctrl+Enter sends to Claudian after the after script ends, then closes");
+        }
+        Func<string,string,Task<NowDoingScriptResult>> fails=(mode,text)=>{calls.Add(mode+"|"+text);return Result(false,"","見出しが見つかりません");};
+        using(var form=new NowDoingForm(opened,view,Actions(written,sent,fails),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Input="🚶 散歩";form.Press(Keys.Enter);
+            Assert(form.Visible&&form.Status=="日誌には書きました。そのあとの処理に失敗しました: 見出しが見つかりません"&&form.StatusIsFailure&&form.Input==""&&written.Count==5&&!form.Busy,"A failed after script keeps the window, empties the box and says the diary was written");
+            SaveNowDoing(form,"now-doing-after-failed-light.png");
+            form.Input="送る";form.Press(Keys.Control|Keys.Enter);
+            Assert(form.Visible&&sent.Count==3&&sent[2]=="送る"&&form.Status==NowDoingForm.AfterFailed("見出しが見つかりません"),"Ctrl+Enter still sends when the after script fails");
+        }
+    }
+    [STAThread]
     static int Main()
     {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
@@ -210,6 +289,7 @@ internal static class UiTests
             string fixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             CheckNowDoingWindow();
+            CheckNowDoingInput();
             CheckHotkeyAndDrag();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
