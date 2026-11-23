@@ -21,6 +21,13 @@ namespace AIUsageManager
         public Func<string, bool> Send;
         // The after script (now_doing_after): (mode "record" or "send", text). Null when it is not set.
         public Func<string, string, Task<NowDoingScriptResult>> After;
+        // The buttons (now_doing_button1 … 9, at Number-1), a copy button's command, and what copy does with its output.
+        public NowDoingButton[] Buttons = new NowDoingButton[NowDoingButton.Count];
+        public Func<string, Task<NowDoingScriptResult>> Copy;
+        public Func<string, bool> SetClipboard;
+        public Func<string, bool> OpenApp;
+        // What settings.ini has wrong about the buttons, shown at the bottom of the window.
+        public string Notice;
         // How long a script's message stays before the window closes.
         public int ShowOutputMs = 1500;
     }
@@ -58,8 +65,12 @@ namespace AIUsageManager
         public const string TooLongToSend = "4000文字までです";
         public const string Working = "日誌に書きました。そのあとの処理をしています…";
         public static string AfterFailed(string reason) { return "日誌には書きました。そのあとの処理に失敗しました: " + reason; }
+        public const string CopyWorking = "命令を実行しています…";
+        public const string Copied = "クリップボードに入れました";
+        public const string ClipboardBusy = "クリップボードに入れられませんでした";
+        public static string CopyFailed(string reason) { return "コピーできませんでした: " + reason; }
         // Layout in 96-DPI units; everything is multiplied by the screen's scale.
-        const float Width96 = 520, Pad = 20, FieldTop = 98, FieldPadding = 20, RowHeight = 26;
+        const float Width96 = 520, Pad = 20, FieldTop = 98, FieldPadding = 20, RowHeight = 26, ButtonRow = 34;
 
         readonly DateTime openedAt;
         readonly NowDoingView view;
@@ -69,6 +80,9 @@ namespace AIUsageManager
         readonly Button close = new Button();
         readonly ToolTip tips = new ToolTip();
         readonly List<NowDoingRecord> shown = new List<NowDoingRecord>();
+        readonly List<Button> buttons = new List<Button>();
+        // Small lines at the bottom of the window: what settings.ini has wrong (red) and other notes (grey).
+        readonly List<KeyValuePair<string, bool>> footer = new List<KeyValuePair<string, bool>>();
         Font title, strong, body, small, smallStrong;
         float scale = 1;
         // Where the parts are, from the top (96-DPI units); they move as the box grows.
@@ -101,6 +115,22 @@ namespace AIUsageManager
             close.AccessibleName = "閉じる (Esc)"; tips.SetToolTip(close, close.AccessibleName);
             close.Click += (s, e) => { if (!busy) Close(); };
             Controls.Add(input); Controls.Add(close);
+            foreach (NowDoingButton b in actions.Buttons ?? new NowDoingButton[0])
+            {
+                if (b == null) continue;
+                int number = b.Number;
+                string name = b.Label + "（Alt+" + number.ToString(CultureInfo.InvariantCulture) + "）";
+                var button = new Button { Text = b.ShortLabel, UseMnemonic = false, TabStop = false, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
+                    BackColor = palette.Hover, ForeColor = palette.Ink, AccessibleName = name, Padding = Padding.Empty };
+                button.FlatAppearance.BorderColor = palette.Border; button.FlatAppearance.BorderSize = 1;
+                button.FlatAppearance.MouseOverBackColor = palette.Track; button.FlatAppearance.MouseDownBackColor = palette.Separator;
+                tips.SetToolTip(button, name);
+                // The box keeps the keyboard after a click, so typing can go on.
+                button.Click += (s, e) => { PressButton(number); if (!IsDisposed) input.Focus(); };
+                buttons.Add(button);
+                Controls.Add(button);
+            }
+            if (!string.IsNullOrEmpty(actions.Notice)) footer.Add(new KeyValuePair<string, bool>(actions.Notice, true));
             // Newest first; only the last few fit.
             for (int i = view.Records.Count - 1; i >= 0 && shown.Count < MaxShown; i--) shown.Add(view.Records[i]);
             if (view.Failure == NowDoingFailure.None) ShowHint(); else ShowStatus(actions.Describe(view.Failure), true);
@@ -126,6 +156,9 @@ namespace AIUsageManager
         }
         public string Folder { get { return view.Path == null ? "" : System.IO.Path.GetDirectoryName(view.Path); } }
         public IList<NowDoingRecord> ShownRecords { get { return shown.AsReadOnly(); } }
+        // The buttons in number order, and the small lines at the bottom of the window.
+        public IList<Button> ButtonControls { get { return buttons.AsReadOnly(); } }
+        public IList<string> Footer { get { return footer.ConvertAll(f => f.Key).AsReadOnly(); } }
         // The record list is shown only when the diary could be read.
         bool HasList { get { return view.Path != null && view.Failure == NowDoingFailure.None; } }
 
@@ -138,12 +171,14 @@ namespace AIUsageManager
         void SetBusy(bool value)
         {
             busy = value; input.ReadOnly = value; close.Enabled = !value;
+            foreach (Button button in buttons) button.Enabled = !value;
         }
 
         int Px(float value) { return (int)Math.Round(value * scale); }
         Rectangle Box(float x, float y, float w, float h) { return new Rectangle(Px(x), Px(y), Px(w), Px(h)); }
         static Font Make(float size, bool bold) { return new Font("Yu Gothic UI", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel); }
-        float ContentHeight { get { return HasList ? listTop + 34 + Math.Max(1, shown.Count) * RowHeight + 14 : statusTop + 20 + 16; } }
+        float FooterTop { get { return HasList ? listTop + 34 + Math.Max(1, shown.Count) * RowHeight + 14 : statusTop + 20 + 16; } }
+        float ContentHeight { get { return FooterTop + (footer.Count == 0 ? 0 : footer.Count * 18 + 8); } }
 
         bool placed;
         void Arrange()
@@ -154,6 +189,7 @@ namespace AIUsageManager
             small = Make(10.5f * scale, false); smallStrong = Make(10.5f * scale, true);
             Font oldInput = input.Font; input.Font = Make(16 * scale, false); if (oldInput != Control.DefaultFont) oldInput.Dispose();
             Font oldClose = close.Font; close.Font = Make(16 * scale, false); if (oldClose != Control.DefaultFont) oldClose.Dispose();
+            foreach (Button button in buttons) button.Font = body;
             Place();
         }
 
@@ -162,7 +198,18 @@ namespace AIUsageManager
         {
             int lineHeight = input.Font.Height;
             fieldHeight = (Px(FieldPadding) + lineHeight * lines) / scale;
-            statusTop = FieldTop + fieldHeight + 6;
+            // The buttons go under the box, left to right in number order; one that does not fit starts the next row.
+            float buttonsTop = FieldTop + fieldHeight + 8;
+            int x = Px(Pad), right = Px(Width96 - Pad), row = 0;
+            foreach (Button button in buttons)
+            {
+                int width = Math.Max(Px(56), TextRenderer.MeasureText(button.Text, button.Font, Size.Empty, TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine).Width + Px(20));
+                width = Math.Min(width, right - Px(Pad));
+                if (x > Px(Pad) && x + width > right) { row++; x = Px(Pad); }
+                button.SetBounds(x, Px(buttonsTop + row * ButtonRow), width, Px(28));
+                x += width + Px(6);
+            }
+            statusTop = buttons.Count == 0 ? FieldTop + fieldHeight + 6 : buttonsTop + (row + 1) * ButtonRow + 2;
             listTop = statusTop + 30;
             ClientSize = new Size(Px(Width96), Px(ContentHeight));
             Rectangle field = Box(Pad, FieldTop, Width96 - 2 * Pad, fieldHeight);
@@ -253,6 +300,8 @@ namespace AIUsageManager
             Color statusColor = statusIsFailure ? palette.Red : statusIsHint ? palette.Muted : palette.Ink;
             Draw(g, status, small, statusColor, Box(Pad, statusTop, inner, 20), TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             if (HasList) PaintList(g, inner);
+            for (int i = 0; i < footer.Count; i++)
+                Draw(g, footer[i].Key, small, footer[i].Value ? palette.Red : palette.Muted, Box(Pad, FooterTop + i * 18, inner, 18), TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             using (var pen = new Pen(palette.Border)) g.DrawRectangle(pen, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
         }
 
@@ -295,7 +344,44 @@ namespace AIUsageManager
             if (keyData == (Keys.Control | Keys.Enter)) { Submit(actions.Send != null); return true; }
             // A multi-line edit box does not select everything with Ctrl+A by itself.
             if (keyData == (Keys.Control | Keys.A)) { input.SelectAll(); return true; }
+            // Alt+1 … Alt+9 press button 1 … 9.
+            Keys code = keyData & Keys.KeyCode;
+            if ((keyData & Keys.Modifiers) == Keys.Alt && code >= Keys.D1 && code <= Keys.D9) { PressButton(code - Keys.D0); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        // text: puts the text in the box; record: writes it like Enter; copy: runs the command and puts its output in
+        // the clipboard. Nothing happens for a number without a button, or while a script runs.
+        public void PressButton(int number)
+        {
+            if (busy || number < 1 || number > NowDoingButton.Count || actions.Buttons == null) return;
+            NowDoingButton button = actions.Buttons[number - 1];
+            if (button == null) return;
+            if (button.Kind == NowDoingButtonKind.Copy) { CopyOutput(button); return; }
+            input.Text = button.Value;
+            if (button.Kind == NowDoingButtonKind.Record) { Submit(false); return; }
+            input.SelectionStart = input.TextLength;
+            input.Focus();
+        }
+
+        // The clipboard and the app are only touched when the command worked and printed something, so a text cut
+        // short or an error is never pasted.
+        async void CopyOutput(NowDoingButton button)
+        {
+            if (actions.Copy == null) return;
+            SetBusy(true);
+            ShowStatus(CopyWorking, false);
+            NowDoingScriptResult result = await actions.Copy(button.Value);
+            if (IsDisposed) return;
+            string problem = !result.Ok ? CopyFailed(result.Reason) : result.Output.Length == 0 ? CopyFailed("出力が空です")
+                : actions.SetClipboard == null || !actions.SetClipboard(result.Output.Replace("\n", "\r\n")) ? ClipboardBusy : null;
+            if (problem != null) { SetBusy(false); ShowStatus(problem, true); return; }
+            if (button.App != null && actions.OpenApp != null) actions.OpenApp(button.App);
+            ShowStatus(Copied, false);
+            await Task.Delay(actions.ShowOutputMs);
+            if (IsDisposed) return;
+            SetBusy(false);
+            Close();
         }
 
         // The same as pressing the keys in the window (for the tests).
@@ -375,6 +461,13 @@ namespace AIUsageManager
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
+        // The clipboard can be held by another app for a moment; it is tried a few times.
+        static bool SetClipboard(string text)
+        {
+            try { Clipboard.SetDataObject(text, true, 5, 100); return true; }
+            catch (ExternalException) { return false; }
+        }
+
         // Runs `AIUsageManager.exe --now-doing`: one window at a time per user, separate from the tray app.
         public static void Run()
         {
@@ -400,12 +493,17 @@ namespace AIUsageManager
                     string message = NowDoingNote.ClaudianMessagePath(localAppData);
                     NowDoingNote.DropStaleMessage(message, DateTime.UtcNow);
                     string workdir = string.IsNullOrEmpty(settings.Workdir) ? AppDomain.CurrentDomain.BaseDirectory : settings.Workdir;
+                    string note = view.Path;
                     var actions = new NowDoingActions
                     {
                         Write = text => NowDoingNote.Write(settings, openedAt, text, backup),
-                        Describe = failure => NowDoingNote.Message(failure, settings)
+                        Describe = failure => NowDoingNote.Message(failure, settings),
+                        Buttons = settings.Buttons,
+                        Notice = NowDoingButton.Problem(settings.BadButtons),
+                        Copy = command => NowDoingScript.RunAsync(command, note == null ? new string[0] : new[] { "--note", note }, workdir, NowDoingScriptLimits.Copy, CancellationToken.None),
+                        SetClipboard = SetClipboard,
+                        OpenApp = AppLinks.Open
                     };
-                    string note = view.Path;
                     if (settings.Claudian && note != null)
                         actions.Send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(note), NowDoingNote.OpenLink, note: note);
                     if (settings.After != null && note != null)

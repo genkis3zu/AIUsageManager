@@ -275,6 +275,79 @@ internal static class UiTests
             Assert(form.Visible&&sent.Count==3&&sent[2]=="送る"&&form.Status==NowDoingForm.AfterFailed("見出しが見つかりません"),"Ctrl+Enter still sends when the after script fails");
         }
     }
+    static NowDoingButton[] Buttons(params string[] values)
+    {
+        var list=new NowDoingButton[NowDoingButton.Count];
+        for(int i=0;i<values.Length;i++)if(values[i]!=null)list[i]=NowDoingButton.Parse(i+1,values[i]);
+        return list;
+    }
+    static void CheckNowDoingButtons()
+    {
+        var opened=new DateTime(2026,11,24,11,5,0);var view=TodayView();
+        var written=new List<string>();var calls=new List<string>();var clips=new List<string>();var apps=new List<string>();
+        Func<string,string,Task<NowDoingScriptResult>> after=(mode,text)=>{calls.Add(mode+"|"+text);return Result(true,"");};
+        Func<Task<NowDoingScriptResult>,NowDoingButton[],NowDoingActions> make=(copied,buttons)=>{
+            var a=Actions(written,null,after);a.Buttons=buttons;a.Copy=command=>{calls.Add("copy|"+command);return copied;};
+            a.SetClipboard=text=>{clips.Add(text);return true;};a.OpenApp=app=>{apps.Add(app);return true;};return a;
+        };
+        var nine=Buttons("🚶 散歩|record:🚶 散歩 ✅","☕ 休憩|record:☕ 休憩 ✅","📚 読書|record:📚 読書 ✅","🧹 片付け|record:🧹 片付け ✅",
+            "⏱️ 作業|text:⏱️ ","🗒️ 議事|text:🗒️ ","📈 依頼文|copy:python r.py|open:claude://","🧘 ストレッチ|record:🧘 ストレッチ","📞 電話の記録をする|text:📞 ");
+        using(var form=new NowDoingForm(opened,view,make(Result(true,"x"),nine),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            float s=Field<float>(form,"scale");var controls=form.ButtonControls;
+            var reading=controls.OrderBy(b=>b.Top).ThenBy(b=>b.Left).ToList();
+            Assert(controls.Count==9&&controls.Select(b=>b.Text).SequenceEqual(nine.Select(b=>b.ShortLabel))&&reading.SequenceEqual(controls)&&controls[8].Text=="📞 電話の記録を","Buttons sit under the box in their order, with names cut at 8 characters");
+            Assert(controls.Select(b=>b.Top).Distinct().Count()>=2&&controls.All(b=>b.Left>=(int)(20*s)-1&&b.Right<=form.ClientSize.Width-(int)(20*s)+1),"Buttons that do not fit wrap to the next row inside the window");
+            Assert(controls.Min(b=>b.Top)>Field<TextBox>(form,"input").Bottom&&controls.Max(b=>b.Bottom)<=(int)(Field<float>(form,"statusTop")*s)+1,"Buttons sit between the box and the status line");
+            Assert(Field<ToolTip>(form,"tips").GetToolTip(controls[4])=="⏱️ 作業（Alt+5）"&&controls[4].AccessibleName=="⏱️ 作業（Alt+5）","A button says its name and its Alt key");
+            SaveNowDoing(form,"now-doing-buttons-light.png");
+            controls[5].PerformClick();
+            Assert(form.Input=="🗒️ "&&Field<TextBox>(form,"input").SelectionStart==form.Input.Length&&form.Visible,"Clicking a text button puts its text in the box");
+        }
+        var three=Buttons("🚶 散歩|record:🚶 散歩 ✅",null,null,null,"⏱️ 作業|text:⏱️ ",null,"📈 依頼文|copy:python r.py|open:claude://");
+        using(var form=new NowDoingForm(opened,view,make(Result(true,"x"),three),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Press(Keys.Alt|Keys.D5);
+            Assert(form.Input=="⏱️ "&&Field<TextBox>(form,"input").SelectionStart==form.Input.Length,"Alt+number presses that button and leaves the caret at the end");
+            form.Input="";form.Press(Keys.Alt|Keys.D8);form.Press(Keys.Alt|Keys.D2);
+            Assert(form.Input==""&&form.Visible&&written.Count==0,"Alt with a number that has no button does nothing");
+            form.Press(Keys.Alt|Keys.D1);
+            Assert(written.Count==1&&written[0]=="🚶 散歩 ✅"&&calls.Last()=="record|🚶 散歩 ✅"&&!form.Visible,"A record button writes its text and runs the after script");
+        }
+        using(var form=new NowDoingForm(opened,view,make(Result(true,"依頼文\n2行目"),three),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.PressButton(7);
+            Assert(calls.Last()=="copy|python r.py"&&clips.Count==1&&clips[0]=="依頼文\r\n2行目"&&apps.Count==1&&apps[0]=="claude"&&form.Status==NowDoingForm.Copied,"A copy button puts the output in the clipboard and opens the app");
+            Assert(Pump(()=>!form.Visible),"The window closes after a copy");
+        }
+        using(var form=new NowDoingForm(opened,view,make(Result(false,"","今日の依頼文がありません"),three),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            form.Press(Keys.Alt|Keys.D7);
+            Assert(clips.Count==1&&apps.Count==1&&form.Visible&&!form.Busy&&form.StatusIsFailure&&form.Status=="コピーできませんでした: 今日の依頼文がありません","A failed copy changes nothing and says why");
+        }
+        using(var form=new NowDoingForm(opened,view,make(Result(true,""),three),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.PressButton(7);
+            Assert(clips.Count==1&&apps.Count==1&&form.Status=="コピーできませんでした: 出力が空です","A copy with no output changes nothing");
+        }
+        var busyClipboard=make(Result(true,"x"),three);busyClipboard.SetClipboard=text=>false;
+        using(var form=new NowDoingForm(opened,view,busyClipboard,ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.PressButton(7);
+            Assert(apps.Count==1&&form.Visible&&form.StatusIsFailure&&form.Status==NowDoingForm.ClipboardBusy,"When the clipboard cannot be set the app is not opened");
+        }
+        var wrong=make(Result(true,"x"),three);wrong.Notice=NowDoingButton.Problem(new[]{2,5});
+        using(var form=new NowDoingForm(opened,view,wrong,ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Footer.Count==1&&form.Footer[0]=="settings.ini の now_doing_button2・now_doing_button5 の書き方が違います","Wrong buttons are named at the bottom of the window");
+            SaveNowDoing(form,"now-doing-button-problem-dark.png");
+        }
+    }
     [STAThread]
     static int Main()
     {
@@ -290,6 +363,7 @@ internal static class UiTests
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             CheckNowDoingWindow();
             CheckNowDoingInput();
+            CheckNowDoingButtons();
             CheckHotkeyAndDrag();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
