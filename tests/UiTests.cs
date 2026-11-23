@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
@@ -84,27 +84,57 @@ internal static class UiTests
         }
         themes.HideDropDown();menu.Close();
     }
+    static void SaveNowDoing(Form form,string name)
+    {
+        string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"screenshots");Directory.CreateDirectory(output);
+        using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(Path.Combine(output,name),ImageFormat.Png);}
+    }
     [STAThread]
     static void CheckNowDoingWindow()
     {
         var written=new List<string>();var results=new Queue<NowDoingFailure>(new[]{NowDoingFailure.Busy,NowDoingFailure.None});
         var opened=new DateTime(2026,11,24,11,5,0);
-        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
+        var view=new NowDoingView{Path=@"C:\Notes\2026年_日誌\2026-11-24 - 日誌.md",Heading="## 📝 日中ログ"};
+        string[] samples={"メールの返信","見積の表を直している","ClaudeCodeコーディング、他のAIでの開発など","昼休み","ケーズデンキへ行って、頭皮サロン用の機器を買う","資料を読む","ストレッチ","会議の準備をしている。長い文は最後が省略されて1行に収まることを確かめるための文"};
+        for(int i=0;i<8;i++)view.Records.Add(new NowDoingRecord{Time=(9+i/2).ToString("00")+":"+(i%2*30).ToString("00"),Text=samples[i]});
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
         {
             form.Show();Application.DoEvents();
-            Assert(form.TopMost&&form.Heading=="11:05 の記録　Enter で日誌へ ／ Esc でやめる","The いまやってること window is on top and says the minute and the keys");
+            Assert(form.TopMost&&form.FormBorderStyle==FormBorderStyle.None&&form.Status=="Enter で日誌へ ／ Esc でやめる"&&!form.StatusIsFailure,"The いまやってること window is on top and says the keys");
+            Assert(form.Page=="2026-11-24 - 日誌  ›  📝 日中ログ"&&form.Folder==@"C:\Notes\2026年_日誌","The いまやってること window shows the page, the section and the folder it writes to");
+            Assert(form.ShownRecords.Count==NowDoingForm.MaxShown&&form.ShownRecords[0].Text==samples[7]&&form.ShownRecords[5].Text==samples[2],"The いまやってること window lists today's records, newest first, at most six");
             Assert(Field<TextBox>(form,"input").MaxLength==200,"The いまやってること box takes at most 200 characters");
+            SaveNowDoing(form,"now-doing-light.png");
             form.Input="  見積の表\tを直している ";form.Submit();
-            Assert(form.Visible&&form.Input=="  見積の表\tを直している "&&form.Heading=="日誌が使用中です。もう一度 Enter を押してください"&&Field<Label>(form,"header").ForeColor==ThemePalette.Light.Red,"A failed write keeps the window and the text, and shows the reason in red");
+            Assert(form.Visible&&form.Input=="  見積の表\tを直している "&&form.Status=="日誌が使用中です。もう一度 Enter を押してください"&&form.StatusIsFailure,"A failed write keeps the window and the text, and shows the reason in red");
             form.Submit();
             Assert(!form.Visible&&written.Count==2&&written[0]=="見積の表 を直している"&&written[1]==written[0],"Enter again writes the cleaned text and closes the window");
         }
-        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        var missing=new NowDoingView{Path=view.Path,Heading=view.Heading,Failure=NowDoingFailure.NoNote};
+        using(var form=new NowDoingForm(opened,missing,text=>NowDoingFailure.None,f=>NowDoingNote.Message(f,null),ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Status=="今日の日誌がまだありません"&&form.StatusIsFailure&&form.Page=="2026-11-24 - 日誌  ›  📝 日中ログ","Without today's diary the window says so as soon as it opens, and still shows which page it means");
+            SaveNowDoing(form,"now-doing-missing-dark.png");
+        }
+        var empty=new NowDoingView{Path=view.Path,Heading=view.Heading};
+        using(var form=new NowDoingForm(opened,empty,text=>NowDoingFailure.None,f=>"",ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.ShownRecords.Count==0&&!form.StatusIsFailure,"A diary without records opens without a failure");
+            SaveNowDoing(form,"now-doing-empty-dark.png");
+        }
+        using(var form=new NowDoingForm(opened,new NowDoingView{Failure=NowDoingFailure.NoSetting},text=>NowDoingFailure.None,f=>NowDoingNote.Message(f,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Page=="書き込み先が決まっていません"&&form.Folder==""&&form.Status=="settings.ini に now_doing_note がありません","Without the setting the window says there is no page to write to");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
         {
             form.Show();Application.DoEvents();form.Input=" \t ";form.Submit();
             Assert(!form.Visible&&written.Count==2,"An empty line closes the window without writing");
         }
-        using(var form=new NowDoingForm(opened,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
         {
             form.Show();Application.DoEvents();form.Input="x";
             var message=new Message();

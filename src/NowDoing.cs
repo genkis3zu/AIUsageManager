@@ -45,12 +45,29 @@ namespace AIUsageManager
 
     internal enum NowDoingFailure { None, NoSetting, BadSetting, NoNote, NoHeading, BadEncoding, Busy }
 
-    // Adds one `[HH:MM] 📝 …` line to the 日中ログ section of the day's diary. Nothing else in the file changes.
+    // One 📝 record of the 日中ログ: the start time (HH:MM) and the text after 📝.
+    internal sealed class NowDoingRecord
+    {
+        public string Time, Text;
+    }
+
+    // What the window shows when it opens: the diary file it writes to, whether that file can take a line now,
+    // and the 📝 records already in its 日中ログ (in file order).
+    internal sealed class NowDoingView
+    {
+        public string Path, Heading;
+        public NowDoingFailure Failure;
+        public List<NowDoingRecord> Records = new List<NowDoingRecord>();
+    }
+
+    // Adds a two-line record (`[HH:MM]`, then `📝 …`) to the 日中ログ section of the day's diary. Nothing else in the file changes.
     internal static class NowDoingNote
     {
         public const string Argument = "--now-doing";
         public const int MaxLength = 200;
+        public const string Mark = "📝";
         static readonly Regex Record = new Regex(@"^\[(\d{2}):(\d{2})", RegexOptions.CultureInvariant);
+        static readonly Regex Stamp = new Regex(@"^\[(\d{2}:\d{2})(?:-\d{2}:\d{2})?\]\s*(.*)$", RegexOptions.CultureInvariant);
         static readonly Regex Field = new Regex(@"\{([^{}]+)\}", RegexOptions.CultureInvariant);
 
         public static string Message(NowDoingFailure failure, NowDoingSettings settings)
@@ -105,17 +122,46 @@ namespace AIUsageManager
         }
         static bool Blank(Line line) { return line.Text.Trim().Length == 0; }
 
-        // The new diary text, or null with the reason when the line cannot be added.
+        // The heading line and the line after the section. The section ends before the next `## ` heading or the
+        // configured end line, whichever comes first.
+        static bool Section(List<Line> lines, NowDoingSettings settings, out int heading, out int end)
+        {
+            heading = lines.FindIndex(l => l.Text == settings.Heading);
+            end = lines.Count;
+            if (heading < 0) return false;
+            for (int i = heading + 1; i < lines.Count; i++)
+                if (lines[i].Text.StartsWith("## ", StringComparison.Ordinal) || (!string.IsNullOrEmpty(settings.Before) && lines[i].Text.StartsWith(settings.Before, StringComparison.Ordinal))) { end = i; break; }
+            return true;
+        }
+
+        // The 📝 records of the section, in file order: `[HH:MM]` with `📝 …` on the next line, or both on one line
+        // (the form the first version wrote). Null with NoHeading when the section is missing.
+        public static List<NowDoingRecord> Records(string content, NowDoingSettings settings, out NowDoingFailure failure)
+        {
+            failure = NowDoingFailure.None;
+            List<Line> lines = Split(content ?? "");
+            int heading, end;
+            if (!Section(lines, settings, out heading, out end)) { failure = NowDoingFailure.NoHeading; return null; }
+            var records = new List<NowDoingRecord>();
+            for (int i = heading + 1; i < end; i++)
+            {
+                Match m = Stamp.Match(lines[i].Text);
+                if (!m.Success) continue;
+                string rest = m.Groups[2].Value;
+                if (rest.Length == 0 && i + 1 < end) rest = lines[i + 1].Text;
+                if (rest.StartsWith(Mark, StringComparison.Ordinal))
+                    records.Add(new NowDoingRecord { Time = m.Groups[1].Value, Text = rest.Substring(Mark.Length).Trim() });
+            }
+            return records;
+        }
+
+        // The new diary text, or null with the reason when the record cannot be added.
         public static string Insert(string content, DateTime time, string text, NowDoingSettings settings, out NowDoingFailure failure)
         {
             failure = NowDoingFailure.None;
             List<Line> lines = Split(content ?? "");
-            int heading = lines.FindIndex(l => l.Text == settings.Heading);
-            if (heading < 0) { failure = NowDoingFailure.NoHeading; return null; }
-            // The section ends before the next `## ` heading or the configured end line, whichever comes first.
-            int end = lines.Count;
-            for (int i = heading + 1; i < lines.Count; i++)
-                if (lines[i].Text.StartsWith("## ", StringComparison.Ordinal) || (!string.IsNullOrEmpty(settings.Before) && lines[i].Text.StartsWith(settings.Before, StringComparison.Ordinal))) { end = i; break; }
+            int heading, end;
+            if (!Section(lines, settings, out heading, out end)) { failure = NowDoingFailure.NoHeading; return null; }
             // Before the first record that starts later than this one; a record at the same minute stays above.
             int minutes = time.Hour * 60 + time.Minute, next = end;
             for (int i = heading + 1; i < end; i++)
@@ -123,18 +169,19 @@ namespace AIUsageManager
                 Match m = Record.Match(lines[i].Text);
                 if (m.Success && int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture) * 60 + int.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture) > minutes) { next = i; break; }
             }
-            // The blank lines right above that point are reused, so the new line has exactly one blank line on each side.
+            // The blank lines right above that point are reused, so the new record has exactly one blank line on each side.
             int blanks = next;
             while (blanks > heading + 1 && Blank(lines[blanks - 1])) blanks--;
             int run = next - blanks;
             // New lines use the file's own line break (the first one found; LF for a file without any).
             string newline = "\n";
             foreach (Line l in lines) if (l.End.Length > 0) { newline = l.End; break; }
-            var entry = new Line { Text = "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "] 📝 " + text, End = newline };
             bool atEnd = next == lines.Count;
             var added = new List<Line>();
             if (run == 0) added.Add(new Line { Text = "", End = newline });
-            added.Add(entry);
+            // The same two-line form as the other records: the time on its own line, the text on the next.
+            added.Add(new Line { Text = "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", End = newline });
+            added.Add(new Line { Text = Mark + " " + text, End = newline });
             if (run <= 1 && !atEnd) added.Add(new Line { Text = "", End = newline });
             int at = run == 0 ? next : blanks + 1;
             if (at == lines.Count && lines.Count > 0 && lines[lines.Count - 1].End.Length == 0)
@@ -144,12 +191,52 @@ namespace AIUsageManager
                 added[added.Count - 1].End = "";
             }
             lines.InsertRange(at, added);
-            var result = new StringBuilder(content.Length + entry.Text.Length + 8);
+            var result = new StringBuilder(content.Length + text.Length + 16);
             foreach (Line l in lines) result.Append(l.Text).Append(l.End);
             return result.ToString();
         }
 
         static readonly byte[] Bom = { 0xEF, 0xBB, 0xBF };
+
+        // Strict UTF-8, with or without a BOM. False when the bytes are not UTF-8.
+        static bool Decode(byte[] bytes, out bool bom, out string content)
+        {
+            bom = bytes.Length >= 3 && bytes[0] == Bom[0] && bytes[1] == Bom[1] && bytes[2] == Bom[2];
+            try { content = new UTF8Encoding(false, true).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)); return true; }
+            catch (DecoderFallbackException) { content = null; return false; }
+        }
+
+        // Read when the window opens: which file the record goes to, whether it can go there now, and the 📝 records
+        // already in the section. The file is only read (other apps may keep writing it meanwhile).
+        public static NowDoingView Look(NowDoingSettings settings, DateTime openedAt)
+        {
+            var view = new NowDoingView { Heading = settings.Heading };
+            if (string.IsNullOrEmpty(settings.Note)) { view.Failure = NowDoingFailure.NoSetting; return view; }
+            view.Path = NotePath(settings.Note, openedAt);
+            if (view.Path == null) { view.Failure = NowDoingFailure.BadSetting; return view; }
+            byte[] bytes;
+            try
+            {
+                using (var file = new FileStream(view.Path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                {
+                    bytes = new byte[file.Length];
+                    int read = 0;
+                    while (read < bytes.Length) { int n = file.Read(bytes, read, bytes.Length - read); if (n == 0) break; read += n; }
+                    if (read != bytes.Length) { view.Failure = NowDoingFailure.Busy; return view; }
+                }
+            }
+            catch (FileNotFoundException) { view.Failure = NowDoingFailure.NoNote; return view; }
+            catch (DirectoryNotFoundException) { view.Failure = NowDoingFailure.NoNote; return view; }
+            catch (IOException) { view.Failure = NowDoingFailure.Busy; return view; }
+            catch (UnauthorizedAccessException) { view.Failure = NowDoingFailure.Busy; return view; }
+            catch (SecurityException) { view.Failure = NowDoingFailure.Busy; return view; }
+            bool bom;
+            string content;
+            if (!Decode(bytes, out bom, out content)) { view.Failure = NowDoingFailure.BadEncoding; return view; }
+            List<NowDoingRecord> records = Records(content, settings, out view.Failure);
+            if (records != null) view.Records = records;
+            return view;
+        }
 
         // Reads the diary just before writing, adds the line, and overwrites the same file in place (no rename: the
         // diary folder is synced and a rename can look like another file). The previous content is kept in `backupPath`.
@@ -171,10 +258,9 @@ namespace AIUsageManager
                         int read = 0;
                         while (read < old.Length) { int n = file.Read(old, read, old.Length - read); if (n == 0) break; read += n; }
                         if (read != old.Length) return NowDoingFailure.Busy;
-                        bool bom = old.Length >= 3 && old[0] == Bom[0] && old[1] == Bom[1] && old[2] == Bom[2];
+                        bool bom;
                         string content;
-                        try { content = new UTF8Encoding(false, true).GetString(old, bom ? 3 : 0, old.Length - (bom ? 3 : 0)); }
-                        catch (DecoderFallbackException) { return NowDoingFailure.BadEncoding; }
+                        if (!Decode(old, out bom, out content)) return NowDoingFailure.BadEncoding;
                         NowDoingFailure failure;
                         string updated = Insert(content, openedAt, text, settings, out failure);
                         if (updated == null) return failure;

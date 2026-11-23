@@ -13,51 +13,57 @@ internal static partial class Tests
         return result;
     }
     static string Lines(params string[] lines) { return string.Join("\n", lines) + "\n"; }
+    static string Shown(System.Collections.Generic.IEnumerable<NowDoingRecord> records)
+    {
+        var text = new StringBuilder();
+        foreach (NowDoingRecord r in records) text.Append(r.Time).Append(' ').Append(r.Text).Append('|');
+        return text.ToString();
+    }
 
     static void RunNowDoingTests()
     {
         string note = Lines("# 日誌", "", "## 📝 日中ログ", "", "[10:00-10:30]", "🏋️ ジム", "", "[11:05]", "前の記録", "", "[12:00-13:00]", "昼食。", "",
             "📎 **今日の生成物**（自動挿入）", "", "## 😊今日の振り返り(21:00)", "", "- [ ] 振り返る");
-        Check("A line goes before the first later record, with one blank line on each side", () => {
-            Assert(AddAt(note, 10, 40, "見積の表を直している") == note.Replace("[11:05]\n", "[10:40] 📝 見積の表を直している\n\n[11:05]\n"));
+        Check("A record goes before the first later record as two lines, with one blank line on each side", () => {
+            Assert(AddAt(note, 10, 40, "見積の表を直している") == note.Replace("[11:05]\n", "[10:40]\n📝 見積の表を直している\n\n[11:05]\n"));
         });
-        Check("A record at the same minute stays above the new line", () => {
-            Assert(AddAt(note, 11, 5, "x") == note.Replace("[12:00-13:00]\n", "[11:05] 📝 x\n\n[12:00-13:00]\n"));
+        Check("A record at the same minute stays above the new one", () => {
+            Assert(AddAt(note, 11, 5, "x") == note.Replace("[12:00-13:00]\n", "[11:05]\n📝 x\n\n[12:00-13:00]\n"));
         });
         Check("A [HH:MM-HH:MM] record is compared by its start", () => {
-            Assert(AddAt(note, 9, 59, "x") == note.Replace("[10:00-10:30]\n", "[09:59] 📝 x\n\n[10:00-10:30]\n"));
-            Assert(AddAt(note, 10, 0, "x") == note.Replace("[11:05]\n", "[10:00] 📝 x\n\n[11:05]\n"));
+            Assert(AddAt(note, 9, 59, "x") == note.Replace("[10:00-10:30]\n", "[09:59]\n📝 x\n\n[10:00-10:30]\n"));
+            Assert(AddAt(note, 10, 0, "x") == note.Replace("[11:05]\n", "[10:00]\n📝 x\n\n[11:05]\n"));
         });
-        Check("Without a later record the line goes before the end line, above its blank lines", () => {
-            Assert(AddAt(note, 18, 0, "x") == note.Replace("昼食。\n\n📎", "昼食。\n\n[18:00] 📝 x\n\n📎"));
+        Check("Without a later record the record goes before the end line, above its blank lines", () => {
+            Assert(AddAt(note, 18, 0, "x") == note.Replace("昼食。\n\n📎", "昼食。\n\n[18:00]\n📝 x\n\n📎"));
         });
         Check("Without an end line the section ends at the next ## heading", () => {
             string plain = note.Replace("📎 **今日の生成物**（自動挿入）\n\n", "");
-            Assert(AddAt(plain, 18, 0, "x", new NowDoingSettings()) == plain.Replace("昼食。\n\n## 😊", "昼食。\n\n[18:00] 📝 x\n\n## 😊"));
+            Assert(AddAt(plain, 18, 0, "x", new NowDoingSettings()) == plain.Replace("昼食。\n\n## 😊", "昼食。\n\n[18:00]\n📝 x\n\n## 😊"));
             // The end line counts only when it is set.
-            Assert(AddAt(note, 18, 0, "x", new NowDoingSettings()) == note.Replace("（自動挿入）\n\n## 😊", "（自動挿入）\n\n[18:00] 📝 x\n\n## 😊"));
+            Assert(AddAt(note, 18, 0, "x", new NowDoingSettings()) == note.Replace("（自動挿入）\n\n## 😊", "（自動挿入）\n\n[18:00]\n📝 x\n\n## 😊"));
         });
-        Check("A section that runs to the end of the file gets the line last", () => {
-            Assert(AddAt(Lines("## 📝 日中ログ", "", "[09:00]", "朝"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[09:00]", "朝", "", "[10:00] 📝 x"));
-            Assert(AddAt("## 📝 日中ログ\n\n[09:00]\n朝", 10, 0, "x") == "## 📝 日中ログ\n\n[09:00]\n朝\n\n[10:00] 📝 x");
-            Assert(AddAt(Lines("## 📝 日中ログ", "[09:00]", "朝", ""), 10, 0, "x") == Lines("## 📝 日中ログ", "[09:00]", "朝", "", "[10:00] 📝 x"));
+        Check("A section that runs to the end of the file gets the record last", () => {
+            Assert(AddAt(Lines("## 📝 日中ログ", "", "[09:00]", "朝"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[09:00]", "朝", "", "[10:00]", "📝 x"));
+            Assert(AddAt("## 📝 日中ログ\n\n[09:00]\n朝", 10, 0, "x") == "## 📝 日中ログ\n\n[09:00]\n朝\n\n[10:00]\n📝 x");
+            Assert(AddAt(Lines("## 📝 日中ログ", "[09:00]", "朝", ""), 10, 0, "x") == Lines("## 📝 日中ログ", "[09:00]", "朝", "", "[10:00]", "📝 x"));
         });
-        Check("An empty section gets the line with one blank line on each side", () => {
-            Assert(AddAt(Lines("## 📝 日中ログ", "## 次"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00] 📝 x", "", "## 次"));
-            Assert(AddAt(Lines("## 📝 日中ログ", "", "", "", "## 次"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00] 📝 x", "", "", "## 次"));
-            Assert(AddAt(Lines("## 📝 日中ログ", "", "[11:00]"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00] 📝 x", "", "[11:00]"));
+        Check("An empty section gets the record with one blank line on each side", () => {
+            Assert(AddAt(Lines("## 📝 日中ログ", "## 次"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00]", "📝 x", "", "## 次"));
+            Assert(AddAt(Lines("## 📝 日中ログ", "", "", "", "## 次"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00]", "📝 x", "", "", "## 次"));
+            Assert(AddAt(Lines("## 📝 日中ログ", "", "[11:00]"), 10, 0, "x") == Lines("## 📝 日中ログ", "", "[10:00]", "📝 x", "", "[11:00]"));
         });
         Check("Times in quotes and lines that start with [[ are not records", () => {
             string quoted = Lines("## 📝 日中ログ", "", "[09:00]", "朝", "> [12:00] 引用", "[[12:00 メモ]]", "", "## 次");
-            Assert(AddAt(quoted, 10, 0, "x") == Lines("## 📝 日中ログ", "", "[09:00]", "朝", "> [12:00] 引用", "[[12:00 メモ]]", "", "[10:00] 📝 x", "", "## 次"));
+            Assert(AddAt(quoted, 10, 0, "x") == Lines("## 📝 日中ログ", "", "[09:00]", "朝", "> [12:00] 引用", "[[12:00 メモ]]", "", "[10:00]", "📝 x", "", "## 次"));
         });
         Check("Records outside the section are not used", () => {
             string other = Lines("## 🎯 今日やること", "[08:00] 予定", "## 📝 日中ログ", "", "[09:00]", "", "## 次", "[09:30] 別");
-            Assert(AddAt(other, 9, 15, "x") == Lines("## 🎯 今日やること", "[08:00] 予定", "## 📝 日中ログ", "", "[09:00]", "", "[09:15] 📝 x", "", "## 次", "[09:30] 別"));
+            Assert(AddAt(other, 9, 15, "x") == Lines("## 🎯 今日やること", "[08:00] 予定", "## 📝 日中ログ", "", "[09:00]", "", "[09:15]", "📝 x", "", "## 次", "[09:30] 別"));
         });
         Check("CRLF files get CRLF lines and keep every other byte", () => {
             string crlf = note.Replace("\n", "\r\n");
-            Assert(AddAt(crlf, 10, 40, "x") == crlf.Replace("[11:05]\r\n", "[10:40] 📝 x\r\n\r\n[11:05]\r\n"));
+            Assert(AddAt(crlf, 10, 40, "x") == crlf.Replace("[11:05]\r\n", "[10:40]\r\n📝 x\r\n\r\n[11:05]\r\n"));
         });
         Check("A missing heading writes nothing and names the heading", () => {
             NowDoingFailure failure;
@@ -65,6 +71,16 @@ internal static partial class Tests
             Assert(NowDoingNote.Insert(note, DateTime.Now, "x", custom, out failure) == null && failure == NowDoingFailure.NoHeading);
             Assert(NowDoingNote.Message(failure, custom) == "「## ログ」が見つかりません");
             Assert(NowDoingNote.Insert(note.Replace("## 📝 日中ログ", "## 📝 日中ログ（下書き）"), DateTime.Now, "x", new NowDoingSettings(), out failure) == null && failure == NowDoingFailure.NoHeading);
+        });
+        Check("The 📝 records of the section are read in both forms, and nothing else is", () => {
+            string log = Lines("## 🎯 今日やること", "[08:00]", "📝 外の記録", "## 📝 日中ログ", "", "[09:00-09:30]", "🏃 散歩", "", "[10:00]", "📝  二行の記録 ",
+                "", "[11:00] 📝 一行の記録", "", "> [11:30] 📝 引用", "[12:00]", "", "📝 空行の後", "", "[13:00-14:00]", "📝 幅のある記録", "", "📎 **今日の生成物**", "[15:00]", "📝 終わりの後");
+            NowDoingFailure failure;
+            var records = NowDoingNote.Records(log, new NowDoingSettings { Before = "📎 **今日の生成物**" }, out failure);
+            Assert(failure == NowDoingFailure.None && Shown(records) == "10:00 二行の記録|11:00 一行の記録|13:00 幅のある記録|");
+            Assert(NowDoingNote.Records(log, new NowDoingSettings { Heading = "## ログ" }, out failure) == null && failure == NowDoingFailure.NoHeading);
+            // A record this window wrote is read back.
+            Assert(Shown(NowDoingNote.Records(AddAt(note, 10, 40, "見積"), new NowDoingSettings(), out failure)) == "10:40 見積|");
         });
         Check("settings.ini keys for the window are read, with the default heading", () => {
             var s = NowDoingSettings.Parse("theme=dark\r\nnow_doing_note=C:\\Notes\\{yyyy-MM-dd}.md\r\nnow_doing_before=📎 **今日の生成物**\r\n");
@@ -99,7 +115,7 @@ internal static partial class Tests
                     Assert(NowDoingNote.Write(new NowDoingSettings { Note = file, Before = "📎 **今日の生成物**" }, opened, "見積", backup) == NowDoingFailure.None);
                     byte[] now = File.ReadAllBytes(real);
                     Assert((now.Length >= 3 && now[0] == 0xEF && now[1] == 0xBB && now[2] == 0xBF) == bom);
-                    Assert(Encoding.UTF8.GetString(now, bom ? 3 : 0, now.Length - (bom ? 3 : 0)) == text.Replace("[11:05]" + newline, "[10:40] 📝 見積" + newline + newline + "[11:05]" + newline));
+                    Assert(Encoding.UTF8.GetString(now, bom ? 3 : 0, now.Length - (bom ? 3 : 0)) == text.Replace("[11:05]" + newline, "[10:40]" + newline + "📝 見積" + newline + newline + "[11:05]" + newline));
                     Assert(Convert.ToBase64String(File.ReadAllBytes(backup)) == Convert.ToBase64String(old));
                 }
         });
@@ -125,6 +141,31 @@ internal static partial class Tests
                 Assert(NowDoingNote.Write(at("held.md"), opened, "x", backup, waits.Add) == NowDoingFailure.Busy);
             Assert(waits.Count == 2 && waits[0] == 300 && waits[1] == 300 && File.ReadAllText(held) == note);
             Assert(NowDoingNote.Message(NowDoingFailure.Busy, null) == "日誌が使用中です。もう一度 Enter を押してください");
+        });
+        Check("Opening the window finds the page, says why it cannot be written, and reads today's records without changing the file", () => {
+            NowDoingView view = NowDoingNote.Look(new NowDoingSettings(), opened);
+            Assert(view.Failure == NowDoingFailure.NoSetting && view.Path == null && view.Records.Count == 0);
+            Assert(NowDoingNote.Look(new NowDoingSettings { Note = @"notes\{yyyy}.md" }, opened).Failure == NowDoingFailure.BadSetting);
+            view = NowDoingNote.Look(at("none-{yyyy-MM-dd}.md"), opened);
+            Assert(view.Failure == NowDoingFailure.NoNote && view.Path == Path.Combine(dir, "none-2026-11-24.md"));
+            Assert(NowDoingNote.Look(at("missing-folder\\{yyyy}.md"), opened).Failure == NowDoingFailure.NoNote);
+            string bad = Path.Combine(dir, "bad.md");
+            File.WriteAllBytes(bad, new byte[] { 0x23, 0xFF });
+            Assert(NowDoingNote.Look(at("bad.md"), opened).Failure == NowDoingFailure.BadEncoding);
+            File.WriteAllText(bad, "# no heading\n");
+            view = NowDoingNote.Look(at("bad.md"), opened);
+            Assert(view.Failure == NowDoingFailure.NoHeading && view.Heading == "## 📝 日中ログ");
+            string today = Path.Combine(dir, "today.md");
+            string text = note.Replace("[11:05]\n前の記録", "[11:05]\n📝 前の記録");
+            byte[] bytes = new UTF8Encoding(true).GetPreamble();
+            byte[] all = new byte[bytes.Length + Encoding.UTF8.GetByteCount(text)];
+            bytes.CopyTo(all, 0); Encoding.UTF8.GetBytes(text, 0, text.Length, all, bytes.Length);
+            File.WriteAllBytes(today, all);
+            // Another app keeping the diary open for writing does not stop the window from reading it.
+            using (new FileStream(today, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
+                view = NowDoingNote.Look(at("today.md"), opened);
+            Assert(view.Failure == NowDoingFailure.None && view.Path == today && Shown(view.Records) == "11:05 前の記録|");
+            Assert(Convert.ToBase64String(File.ReadAllBytes(today)) == Convert.ToBase64String(all));
         });
         Check("Saving the theme, notice and waiting choices keeps the now_doing_ lines", () => {
             string ini = Path.Combine(dir, "settings.ini");
