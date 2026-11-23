@@ -121,6 +121,8 @@ namespace AIUsageManager
         public PopupForm()
         {
             Text="AI Usage Manager";Icon=windowIcon;FormBorderStyle=FormBorderStyle.None;ShowInTaskbar=false;TopMost=true;StartPosition=FormStartPosition.Manual;
+            // Dragging moves the window, so a double click there must not maximize it.
+            MaximizeBox=false;MinimizeBox=false;
             AutoScaleMode=AutoScaleMode.None;BackColor=Color.White;DoubleBuffered=true;KeyPreview=true;
             AccessibleName="AI 使用量";
             Controls.Add(content);
@@ -286,6 +288,11 @@ namespace AIUsageManager
         {
             base.WndProc(ref m);
             if(m.Msg==0x02E0){scale=(m.WParam.ToInt32()&0xffff)/96f;LayoutRows();ClampToScreen();}
+            // The window can be moved by dragging any part of it that is not a button, a service row or a waiting item.
+            if(m.Msg==0x84&&m.Result==(IntPtr)1) {
+                long at=m.LParam.ToInt64();
+                if(WaitingTarget(PointToClient(new Point((short)(at&0xffff),(short)((at>>16)&0xffff))))==null)m.Result=(IntPtr)2;
+            }
         }
         protected override void OnHandleCreated(EventArgs e)
         {

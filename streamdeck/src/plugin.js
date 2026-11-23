@@ -1,8 +1,8 @@
 'use strict';
 const { userSid, pipeName, readSnapshot } = require('./pipe');
 const { initialConnection, nextConnection } = require('./state');
-const { ACTIONS, STATUS_ACTION, WAITING_ACTION, APP_LINKS, normalizeKeySettings, nextStyle, nextPalette } = require('./settings');
-const { keyView, statusView, waitingView, renderKey, STATUS_TITLE, WAITING_TITLE } = require('./render');
+const { ACTIONS, STATUS_ACTION, WAITING_ACTION, NOW_DOING_ACTION, APP_LINKS, normalizeKeySettings, nextStyle, nextPalette } = require('./settings');
+const { keyView, statusView, waitingView, nowDoingView, renderKey, STATUS_TITLE, WAITING_TITLE } = require('./render');
 const { STATUS_PAGES } = require('../../obsidian/src/usage');
 const location = require('./location');
 const { parseArgs, StreamDeck } = require('./streamdeck');
@@ -25,7 +25,8 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
   function render(context) {
     const key = keys.get(context);
     if (!key) return;
-    const view = key.notice ? message(key, key.notice) : starting ? message(key, '起動中') :
+    // The いまやってること key keeps its fixed picture while the tray app starts; it does not depend on the tray app.
+    const view = key.notice ? message(key, key.notice) : key.nowDoing ? nowDoingView() : starting ? message(key, '起動中') :
       key.status ? statusView(connection) : key.waiting ? waitingView(connection, now()) : keyView(key.service, connection, key.settings, now());
     if (!key.notice && !starting) key.needsLogin = view.needsLogin === true;
     const svg = renderKey(view, key.settings);
@@ -84,8 +85,18 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
 
   async function press(context, long) {
     const key = keys.get(context);
+    if (!key) return;
+    // The いまやってること key starts the app's own short window process, short or long press, whether or not
+    // the tray app is running or starting; it never starts the tray app.
+    if (key.nowDoing) {
+      const file = resolveAppPath(manualPath);
+      if (!file) { showNotice(context); return; }
+      try { await launchApp(file, [location.NOW_DOING]); } catch { showNotice(context); return; }
+      deck.showOk(context);
+      return;
+    }
     // While the tray app is starting, presses are ignored so a second press does not start it again.
-    if (!key || starting) return;
+    if (starting) return;
     if (connection.status === 'disconnected') { await startTray([], context); return; }
     // The AIの状況 key opens the status page of the company with the problem; only the two fixed pages can open.
     // The 対応待ち key opens the app of the longest wait (or the newest finished item); only the four fixed links can open.
@@ -118,6 +129,12 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     switch (event) {
       case 'willAppear': {
         const service = ACTIONS[message.action];
+        // The いまやってること key needs no values from the tray app, so it does not start polling (or the tray app).
+        if (message.action === NOW_DOING_ACTION) {
+          keys.set(context, { service: null, title: '', nowDoing: true, settings: STATUS_SETTINGS, notice: null, lastImage: null, pressedAt: null });
+          render(context);
+          return;
+        }
         if (message.action === WAITING_ACTION) {
           keys.set(context, { service: null, title: WAITING_TITLE, waiting: true, settings: STATUS_SETTINGS, notice: null, lastImage: null, pressedAt: null });
         } else if (message.action === STATUS_ACTION) {
@@ -135,11 +152,11 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
       }
       case 'willDisappear':
         keys.delete(context);
-        if (keys.size === 0 && interval) { timers.clearInterval(interval); interval = null; }
+        if (interval && ![...keys.values()].some(k => !k.nowDoing)) { timers.clearInterval(interval); interval = null; }
         return;
       case 'didReceiveSettings': {
         const key = keys.get(context);
-        if (!key || key.status || key.waiting) return;
+        if (!key || key.status || key.waiting || key.nowDoing) return;
         key.settings = normalizeKeySettings(key.service, payload.settings);
         render(context);
         return;

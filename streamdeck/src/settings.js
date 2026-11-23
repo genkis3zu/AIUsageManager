@@ -6,6 +6,8 @@ const STATUS_ACTION = PLUGIN + '.status';
 // The 対応待ち key (sessions waiting for the user) has no settings either; pressing it opens one of these four apps.
 const WAITING_ACTION = PLUGIN + '.waiting';
 const APP_LINKS = { claude: 'claude://', codex: 'codex://', vscode: 'vscode://', grokbot: 'grokbot://' };
+// The いまやってること key shows a fixed picture; pressing it opens the app's small window that writes one line to the diary.
+const NOW_DOING_ACTION = PLUGIN + '.nowdoing';
 const STYLES = ['ring', 'vertical', 'horizontal'];
 const METRICS = ['used', 'remaining'];
 const PALETTES = [
@@ -35,4 +37,4 @@ function nextStyle(style) { return nextIn(STYLES, style); }
 function nextPalette(id) { return nextIn(PALETTES.map(p => p.id), id); }
 function paletteFor(id) { return PALETTES.find(p => p.id === id) || PALETTES[0]; }
 
-module.exports = { ACTIONS, STATUS_ACTION, WAITING_ACTION, APP_LINKS, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };
+module.exports = { ACTIONS, STATUS_ACTION, WAITING_ACTION, NOW_DOING_ACTION, APP_LINKS, PALETTES, STYLES, METRICS, defaultSettings, normalizeKeySettings, nextStyle, nextPalette, paletteFor };

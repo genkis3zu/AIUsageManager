@@ -58,13 +58,13 @@ test('launch passes no arguments, detached, no shell, in the app folder', async 
   assert.deepEqual(call, ['C:\\Apps\\AIUsageManager.exe', [], { shell: false, detached: true, stdio: 'ignore', windowsHide: false, cwd: 'C:\\Apps' }]);
   assert.equal(unref, 1);
 });
-test('launch passes only the three login arguments and the background start', async () => {
+test('launch passes only the three login arguments, the background start and the いまやってること window', async () => {
   const calls = [];
   const spawn = (...args) => { calls.push(args[1]); const child = new EventEmitter(); child.unref = () => {}; queueMicrotask(() => child.emit('spawn')); return child; };
-  for (const arg of ['--login-claude', '--login-codex', '--login-grok', '--background']) await launchApp('C:\\Apps\\AIUsageManager.exe', spawn, [arg]);
-  assert.deepEqual(calls, [['--login-claude'], ['--login-codex'], ['--login-grok'], ['--background']]);
+  for (const arg of ['--login-claude', '--login-codex', '--login-grok', '--background', '--now-doing']) await launchApp('C:\\Apps\\AIUsageManager.exe', spawn, [arg]);
+  assert.deepEqual(calls, [['--login-claude'], ['--login-codex'], ['--login-grok'], ['--background'], ['--now-doing']]);
   const never = () => { throw new Error('unexpected spawn'); };
-  for (const args of [['--refresh'], ['--show'], ['--login-claude', '--login-codex'], ['--background', '--login-claude'], ['--login-claude x'], 'x'])
+  for (const args of [['--refresh'], ['--show'], ['--login-claude', '--login-codex'], ['--background', '--login-claude'], ['--now-doing', '--background'], ['--now-doing x'], ['--login-claude x'], 'x'])
     await assert.rejects(launchApp('C:\\Apps\\AIUsageManager.exe', never, args), /Invalid app arguments/);
 });
 test('launch failure rejects', async () => {

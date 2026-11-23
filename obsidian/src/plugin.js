@@ -3,6 +3,7 @@ const {Plugin,PluginSettingTab,Setting,MarkdownView,Notice}=require('obsidian');
 const {normalizeSettings,emptyServices}=require('./usage');
 const {BridgeClient,launchApp}=require('./bridge');
 const {UsageToolbar}=require('./toolbar');
+const claudian=require('./claudian');
 class UsageSettings extends PluginSettingTab {
   display() {
     this.containerEl.empty();
@@ -18,6 +19,8 @@ class UsagePlugin extends Plugin {
     this.addCommand({id:'toggle-size',name:'表示サイズを切り替え',callback:()=>this.setMode(this.settings.mode==='compact'?'standard':'compact')});
     this.addCommand({id:'refresh',name:'使用量を更新',callback:()=>this.command('--refresh')});
     this.addCommand({id:'open',name:'アプリで詳細を開く',callback:()=>this.command('--show')});
+    // The いまやってること window (Ctrl+Enter) hands its line to Claudian through this address.
+    this.registerObsidianProtocolHandler(claudian.ACTION,params=>this.sendToClaudian(params));
     for(const event of ['layout-change','active-leaf-change','file-open'])this.registerEvent(this.app.workspace.on(event,()=>this.reconcile()));
     this.app.workspace.onLayoutReady(()=>{if(!this.closed){this.reconcile();this.poll();}});
     this.registerInterval(window.setInterval(()=>this.poll(),15000));
@@ -61,6 +64,13 @@ class UsagePlugin extends Plugin {
     if(!this.settings.appPath){new Notice('AI Usage Manager の設定で実行ファイルの場所を指定してください');return;}
     try {await launchApp(this.settings.appPath,action);if(action==='--refresh'){this.message='使用量を更新中…';this.render();clearTimeout(this.refreshTimer);this.refreshTimer=setTimeout(()=>this.poll(),1500);}}
     catch {new Notice('AI Usage Manager を起動できませんでした。設定の実行ファイルを確認してください');}
+  }
+  async sendToClaudian(params) {
+    if(this.closed)return;
+    const text=claudian.takeMessage(params&&params.token,claudian.messagePath());
+    if(text===null){new Notice('Claudian に送る内容が見つかりません（古いか、もう送ってあります）');return;}
+    const problem=await claudian.sendToClaudian(this.app,text);
+    if(problem&&!this.closed)new Notice(problem);
   }
   onunload() {this.closed=true;clearTimeout(this.settingsTimer);clearTimeout(this.refreshTimer);this.bridge?.dispose();for(const toolbar of this.toolbars?.values()||[])toolbar.destroy();this.toolbars?.clear();}
 }

@@ -66,7 +66,7 @@ namespace AIUsageManager
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
             : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
-        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null)
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null, string nowDoingHotkey=null)
         {
             startup=startupStore??(source==null?RegistryStartupStore.Default():null);
             this.waitingSource=waitingSource??(source==null?new LocalWaitingSource(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)):null);
@@ -120,6 +120,11 @@ namespace AIUsageManager
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("終了",null,(s,e)=>ExitThread());
             ApplyTheme();
+            // The shortcut key for the いまやってること window (now_doing_hotkey in settings.ini).
+            NowDoingHotkey hotkey=NowDoingHotkey.Parse(nowDoingHotkey);
+            if(hotkey!=null)nowDoingKey=new HotkeyWindow(hotkey,OpenNowDoing);
+            string hotkeyProblem=NowDoingHotkey.Problem(nowDoingHotkey,hotkey,nowDoingKey!=null&&nowDoingKey.Registered);
+            if(hotkeyProblem!=null)tray.ShowBalloonTip(8000,"いまやってること",hotkeyProblem,ToolTipIcon.Warning);
             menu.Opening+=(s,e)=> {
                 ApplyTheme();
                 // The entry can also be changed outside the app (for example by another copy of it).
@@ -296,9 +301,24 @@ namespace AIUsageManager
             }
         }
         void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus,latestWaiting)); }
+        HotkeyWindow nowDoingKey;
+        // Opens the いまやってること window as its own process, the same way the Stream Deck key does. Windows lets the
+        // app that got the shortcut key bring a window to the front, and this passes that on to the new process.
+        void OpenNowDoing()
+        {
+            try
+            {
+                using(var process=Process.Start(new ProcessStartInfo(Application.ExecutablePath,NowDoingNote.Argument){UseShellExecute=false}))
+                    if(process!=null)AllowSetForegroundWindow(process.Id);
+            }
+            catch(System.ComponentModel.Win32Exception) { tray.ShowBalloonTip(4000,"いまやってること","窓を開けませんでした。",ToolTipIcon.Warning); }
+            catch(InvalidOperationException) { tray.ShowBalloonTip(4000,"いまやってること","窓を開けませんでした。",ToolTipIcon.Warning); }
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int processId);
         protected override void ExitThreadCore()
         {
             if(exiting)return;exiting=true;
+            if(nowDoingKey!=null){nowDoingKey.Dispose();nowDoingKey=null;}
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
             refreshTimer.Stop();displayTimer.Stop();waitingTimer.Stop();cancellation.Cancel();showWait.Unregister(null);
             if(refreshWait!=null)refreshWait.Unregister(null);

@@ -29,8 +29,11 @@ function resolveAppPath(manualPath, file, fs = nodeFs) {
 
 // Starts the tray app hidden; a tray app that is already running is left alone and shows no window.
 const BACKGROUND_START = '--background';
-// The only arguments the plugin may pass: ask the tray app to start one service's official login, or start it in the background.
-const APP_ARGUMENTS = ['--login-claude', '--login-codex', '--login-grok', BACKGROUND_START];
+// Opens the small いまやってること window as its own short process; the tray app is not involved.
+const NOW_DOING = '--now-doing';
+// The only arguments the plugin may pass: ask the tray app to start one service's official login, start it in the
+// background, or open the いまやってること window.
+const APP_ARGUMENTS = ['--login-claude', '--login-codex', '--login-grok', BACKGROUND_START, NOW_DOING];
 
 // Detached so the tray app keeps running when Stream Deck or this plugin exits. The working directory is
 // the app's own folder: inheriting the plugin folder would keep it locked and break plugin updates.
@@ -44,4 +47,4 @@ function launchApp(file, spawn = childProcess.spawn, args = []) {
   });
 }
 
-module.exports = { locationFile, readAppLocation, resolveAppPath, launchApp, BACKGROUND_START };
+module.exports = { locationFile, readAppLocation, resolveAppPath, launchApp, BACKGROUND_START, NOW_DOING };

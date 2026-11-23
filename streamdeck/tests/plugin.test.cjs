@@ -14,7 +14,7 @@ const appear = (context, action = ID + '.codex', settings = {}) => ({ event: 'wi
 function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', launch = async () => {} } = {}) {
   const sent = [], resolveCalls = [], launches = [], launchArgs = [];
   let clock = 1000, readCount = 0;
-  const deck = { setImage: (c, svg) => sent.push(['image', c, svg]), setSettings: (c, s) => sent.push(['settings', c, s]), showAlert: c => sent.push(['alert', c]), openUrl: url => sent.push(['open', url]) };
+  const deck = { setImage: (c, svg) => sent.push(['image', c, svg]), setSettings: (c, s) => sent.push(['settings', c, s]), showAlert: c => sent.push(['alert', c]), showOk: c => sent.push(['ok', c]), openUrl: url => sent.push(['open', url]) };
   const timers = {
     intervals: [], timeouts: [],
     setInterval(fn, ms) { const t = { fn, ms, cleared: false }; this.intervals.push(t); return t; },
@@ -346,4 +346,49 @@ test('a timer left from an earlier start does not end a later start early', asyn
   assert.equal(h.launches.length, 2);
   await fire(h, 5000); await fire(h, 10000);
   assert.ok(h.images('k1').at(-1).includes('起動中'));
+});
+const NOW = ID + '.nowdoing';
+test('the いまやってること key shows its fixed picture and does not read the tray app or start it', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }] });
+  await h.plugin.handle(appear('n1', NOW));
+  const svg = h.images('n1').at(-1);
+  assert.ok(svg.includes('📝') && svg.includes('いま') && svg.includes('やってること'));
+  assert.doesNotMatch(svg, /%|未接続|読み込み中/);
+  assert.equal(h.reads(), 0); assert.deepEqual(h.timers.intervals, []); assert.deepEqual(h.launches, []); assert.deepEqual(h.settings('n1'), []);
+});
+test('pressing the いまやってること key starts the app with --now-doing and shows ✓, short or long', async () => {
+  const h = harness();
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('n1', NOW));
+  await press(h, 'n1', 100); await press(h, 'n1', 600);
+  assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe', 'C:\\Apps\\AIUsageManager.exe']);
+  assert.deepEqual(h.launchArgs, [['--now-doing'], ['--now-doing']]);
+  assert.deepEqual(h.sent.filter(s => s[0] === 'ok'), [['ok', 'n1'], ['ok', 'n1']]);
+  assert.deepEqual(h.settings('n1'), []); assert.deepEqual(h.opened(), []);
+});
+test('the いまやってること key starts its window while the tray app is not connected or is starting, and never starts the tray app', async () => {
+  const h = harness({ reads: closedLater() });
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('n1', NOW)); await h.plugin.poll();
+  assert.ok(h.images('k1').at(-1).includes('未接続'));
+  await press(h, 'n1', 100);
+  assert.deepEqual(h.launchArgs, [['--now-doing']]);
+  // A press on a usage key starts the tray app (起動中); the いまやってること key still opens its window and keeps its picture.
+  await press(h, 'k1', 100);
+  assert.ok(h.images('k1').at(-1).includes('起動中')); assert.ok(!h.images('n1').at(-1).includes('起動中'));
+  await press(h, 'n1', 100);
+  assert.deepEqual(h.launchArgs, [['--now-doing'], [], ['--now-doing']]);
+});
+test('the いまやってること key without a usable app shows アプリの場所を設定 and no ✓', async () => {
+  for (const options of [{ resolve: () => null }, { launch: async () => { throw new Error('nope'); } }]) {
+    const h = harness(options);
+    await h.plugin.handle(appear('n1', NOW));
+    await press(h, 'n1', 100);
+    assert.ok(h.images('n1').at(-1).includes('アプリの場所を設定'));
+    assert.ok(h.sent.some(s => s[0] === 'alert')); assert.ok(!h.sent.some(s => s[0] === 'ok'));
+  }
+});
+test('polling stops when only いまやってること keys are left', async () => {
+  const h = harness();
+  await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('n1', NOW));
+  await h.plugin.handle({ event: 'willDisappear', context: 'k1' });
+  assert.equal(h.timers.intervals[0].cleared, true);
 });

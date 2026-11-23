@@ -1,6 +1,6 @@
 {
   "Name": "AI Usage Manager",
-  "Version": "1.4.0.0",
+  "Version": "1.5.0.0",
   "Author": "AI Usage Manager contributors",
   "Description": "AI Usage Manager（トレイアプリ）が取得したClaude・Codex・Grokの使用量と、AnthropicとOpenAIの障害情報を表示します。このプラグイン自身はインターネットに接続しません。",
   "URL": "https://github.com/genkis3zu/AIUsageManager",
@@ -61,6 +61,16 @@
       "UUID": "io.github.genkis3zu.aiusagemanager.waiting",
       "Name": "対応待ち",
       "Tooltip": "Claude と Codex のうち、返事を待っているものを表示します。押すと、いちばん長く待たせているアプリを開きます",
+      "Icon": "imgs/action",
+      "Controllers": ["Keypad"],
+      "SupportedInMultiActions": false,
+      "UserTitleEnabled": false,
+      "States": [{ "Image": "imgs/key", "ShowTitle": false }]
+    },
+    {
+      "UUID": "io.github.genkis3zu.aiusagemanager.nowdoing",
+      "Name": "いまやってること",
+      "Tooltip": "押すと小さな窓を開き、入れた1行を今日の日誌の日中ログに書きます",
       "Icon": "imgs/action",
       "Controllers": ["Keypad"],
       "SupportedInMultiActions": false,

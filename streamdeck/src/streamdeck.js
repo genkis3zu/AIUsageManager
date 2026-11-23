@@ -46,6 +46,7 @@ class StreamDeck extends EventEmitter {
   setSettings(context, settings) { this.send({ event: 'setSettings', context, payload: settings }); }
   getGlobalSettings() { this.send({ event: 'getGlobalSettings', context: this.args.pluginUUID }); }
   showAlert(context) { this.send({ event: 'showAlert', context }); }
+  showOk(context) { this.send({ event: 'showOk', context }); }
   // Stream Deck opens the page in the default browser; the plugin itself makes no request.
   openUrl(url) { this.send({ event: 'openUrl', payload: { url } }); }
 }

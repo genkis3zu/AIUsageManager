@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
@@ -84,7 +84,119 @@ internal static class UiTests
         }
         themes.HideDropDown();menu.Close();
     }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam);
+    static void CheckHotkeyAndDrag()
+    {
+        var key=NowDoingHotkey.Parse("Ctrl+Alt+Shift+F24");int presses=0;
+        using(var first=new HotkeyWindow(key,()=>presses++))
+        {
+            Assert(first.Registered,"The shortcut key is registered with Windows");
+            using(var second=new HotkeyWindow(key,()=>{}))Assert(!second.Registered,"A shortcut key that is already taken is reported as not registered");
+            SendMessage(first.Handle,0x0312,(IntPtr)1,IntPtr.Zero);
+            Assert(presses==1,"Pressing the shortcut key opens the いまやってること window");
+            SendMessage(first.Handle,0x0312,(IntPtr)2,IntPtr.Zero);
+            Assert(presses==1,"Another shortcut key message does nothing");
+        }
+        using(var again=new HotkeyWindow(key,()=>{}))Assert(again.Registered,"Closing gives the shortcut key back to Windows");
+        using(var popup=new PopupForm())
+        {
+            popup.SetWaiting(new WaitingList{Items=new[]{new WaitingItem{Key="Claude/q",Service="Claude",Place="P",App="claude",Reason=WaitReason.Question,Since=DateTimeOffset.Now}}},DateTimeOffset.Now);
+            popup.OpenAt(new Point(400,700));popup.Refresh();Application.DoEvents();
+            float s=Field<float>(popup,"scale");
+            Func<float,float,int> hit=(x,y)=>{Point p=popup.PointToScreen(new Point((int)(x*s),(int)(y*s)));return SendMessage(popup.Handle,0x84,IntPtr.Zero,new IntPtr(((p.Y&0xffff)<<16)|(p.X&0xffff))).ToInt32();};
+            Assert(hit(60,30)==2&&!popup.MaximizeBox,"The 使用量 window can be dragged by its heading, and a double click there does not maximize it");
+            Assert(hit(200,100)==1,"A waiting item in the 使用量 window stays clickable");
+            popup.Hide();
+        }
+    }
+    static void SaveNowDoing(Form form,string name)
+    {
+        string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"screenshots");Directory.CreateDirectory(output);
+        using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,image.Size));image.Save(Path.Combine(output,name),ImageFormat.Png);}
+    }
     [STAThread]
+    static void CheckNowDoingWindow()
+    {
+        var written=new List<string>();var results=new Queue<NowDoingFailure>(new[]{NowDoingFailure.Busy,NowDoingFailure.None});
+        var opened=new DateTime(2026,11,24,11,5,0);
+        var view=new NowDoingView{Path=@"C:\Notes\2026年_日誌\2026-11-24 - 日誌.md",Heading="## 📝 日中ログ"};
+        string[] samples={"メールの返信","見積の表を直している","設計メモを書いている","昼休み","買い物に出る","資料を読む","ストレッチ","会議の準備をしている。長い文は最後が省略されて1行に収まることを確かめるための文"};
+        for(int i=0;i<8;i++)view.Records.Add(new NowDoingRecord{Time=(9+i/2).ToString("00")+":"+(i%2*30).ToString("00"),Text=samples[i]});
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.TopMost&&form.FormBorderStyle==FormBorderStyle.None&&form.Status=="Enter で日誌へ ／ Esc でやめる"&&!form.StatusIsFailure,"The いまやってること window is on top and says the keys");
+            Assert(form.Page=="2026-11-24 - 日誌  ›  📝 日中ログ"&&form.Folder==@"C:\Notes\2026年_日誌","The いまやってること window shows the page, the section and the folder it writes to");
+            Assert(form.ShownRecords.Count==NowDoingForm.MaxShown&&form.ShownRecords[0].Text==samples[7]&&form.ShownRecords[5].Text==samples[2],"The いまやってること window lists today's records, newest first, at most six");
+            Assert(Field<TextBox>(form,"input").MaxLength==200,"The いまやってること box takes at most 200 characters");
+            SaveNowDoing(form,"now-doing-light.png");
+            form.Input="  見積の表\tを直している ";form.Submit();
+            Assert(form.Visible&&form.Input=="  見積の表\tを直している "&&form.Status=="日誌が使用中です。もう一度 Enter を押してください"&&form.StatusIsFailure,"A failed write keeps the window and the text, and shows the reason in red");
+            form.Submit();
+            Assert(!form.Visible&&written.Count==2&&written[0]=="見積の表 を直している"&&written[1]==written[0],"Enter again writes the cleaned text and closes the window");
+        }
+        var missing=new NowDoingView{Path=view.Path,Heading=view.Heading,Failure=NowDoingFailure.NoNote};
+        using(var form=new NowDoingForm(opened,missing,text=>NowDoingFailure.None,f=>NowDoingNote.Message(f,null),ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Status=="今日の日誌がまだありません"&&form.StatusIsFailure&&form.Page=="2026-11-24 - 日誌  ›  📝 日中ログ","Without today's diary the window says so as soon as it opens, and still shows which page it means");
+            SaveNowDoing(form,"now-doing-missing-dark.png");
+        }
+        var empty=new NowDoingView{Path=view.Path,Heading=view.Heading};
+        using(var form=new NowDoingForm(opened,empty,text=>NowDoingFailure.None,f=>"",ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.ShownRecords.Count==0&&!form.StatusIsFailure,"A diary without records opens without a failure");
+            SaveNowDoing(form,"now-doing-empty-dark.png");
+        }
+        using(var form=new NowDoingForm(opened,new NowDoingView{Failure=NowDoingFailure.NoSetting},text=>NowDoingFailure.None,f=>NowDoingNote.Message(f,null),ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Page=="書き込み先が決まっていません"&&form.Folder==""&&form.Status=="settings.ini に now_doing_note がありません","Without the setting the window says there is no page to write to");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input=" \t ";form.Submit();
+            Assert(!form.Visible&&written.Count==2,"An empty line closes the window without writing");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input="x";
+            var message=new Message();
+            typeof(NowDoingForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{message,Keys.Escape});
+            Assert(!form.Visible&&written.Count==2,"Esc closes the window without writing");
+        }
+        var key=typeof(NowDoingForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic);
+        var sent=new List<string>();
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Status=="Enter で日誌へ ／ Ctrl+Enter で日誌と Claudian へ ／ Esc でやめる","With Claudian on, the window says Ctrl+Enter also sends to Claudian");
+            SaveNowDoing(form,"now-doing-claudian-light.png");
+            form.Input="見積";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(!form.Visible&&written.Count==3&&written[2]=="見積"&&sent.Count==1&&sent[0]=="見積","Ctrl+Enter writes the line to the diary, then hands it to Claudian and closes");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();form.Input="日誌だけ";key.Invoke(form,new object[]{new Message(),Keys.Enter});
+            Assert(!form.Visible&&written.Count==4&&sent.Count==1,"Enter alone does not send to Claudian");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return false;}))
+        {
+            form.Show();Application.DoEvents();form.Input="送れない";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(form.Visible&&form.Input==""&&form.StatusIsFailure&&form.Status==NowDoingForm.ClaudianFailed&&written.Count==5&&sent.Count==2,"When Claudian cannot be reached the line stays written once, the box is emptied and the window says so");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.Busy;},f=>"busy",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();form.Input="書けない";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(form.Visible&&form.Input=="書けない"&&sent.Count==2,"Nothing goes to Claudian when the diary cannot be written");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input="y";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(!form.Visible&&written[written.Count-1]=="y"&&sent.Count==2,"Without the setting Ctrl+Enter only writes to the diary");
+        }
+    }
     static int Main()
     {
         Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
@@ -97,6 +209,8 @@ internal static class UiTests
         {
             string fixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
+            CheckNowDoingWindow();
+            CheckHotkeyAndDrag();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var snapshots=new SnapshotServer("AIUsageManager.UiTests."+Guid.NewGuid().ToString("N")))

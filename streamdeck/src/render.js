@@ -65,6 +65,11 @@ function waitingView(connection, now) {
   return { ...base, kind: 'waiting', count: waits.length, top, finished: items.length - waits.length, unreadable: unreadable.map(u => u.service), tone };
 }
 
+// The いまやってること key always shows the same picture; it shows no usage values.
+function nowDoingView() {
+  return { title: '', kind: 'nowdoing', message: '', caption: '', tone: 'muted', bars: [] };
+}
+
 const FONT = "'Segoe UI','Yu Gothic UI','Meiryo',sans-serif";
 const esc = value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const text = (x, y, value, size, fill, weight = 400, anchor = 'middle') =>
@@ -193,6 +198,7 @@ function renderKey(view, settings) {
   let body;
   if (view.kind === 'status') body = statusBody(view, palette);
   else if (view.kind === 'waiting') body = waitingBody(view, palette);
+  else if (view.kind === 'nowdoing') body = text(72, 62, '📝', 40, palette.text) + text(72, 98, 'いま', 18, palette.text, 700) + text(72, 124, 'やってること', 18, palette.text, 700);
   else if (view.kind !== 'usage') body = text(72, 86, view.message, view.message.length > 6 ? 14 : 18, view.kind === 'loading' ? palette.muted : palette.text, 700);
   else {
     // A caption (e.g. 保存された値) takes the bottom line instead of the reset time.
@@ -203,7 +209,7 @@ function renderKey(view, settings) {
   }
   return '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">' +
     `<rect width="144" height="144" rx="18" fill="${palette.background}"/>` +
-    text(12, 21, view.title, 15, palette.text, 700, 'start') + body + '</svg>';
+    (view.title ? text(12, 21, view.title, 15, palette.text, 700, 'start') : '') + body + '</svg>';
 }
 
-module.exports = { keyView, statusView, waitingView, renderKey, STATUS_TITLE, WAITING_TITLE };
+module.exports = { keyView, statusView, waitingView, nowDoingView, renderKey, STATUS_TITLE, WAITING_TITLE };
