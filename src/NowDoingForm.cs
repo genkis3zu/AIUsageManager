@@ -557,6 +557,36 @@ namespace AIUsageManager
             catch (ExternalException) { return false; }
         }
 
+        // What the window can do with these settings. Each part is there only when its setting is: no buttons, no scripts
+        // and nothing for Claudian unless settings.ini asks for them, so someone who uses only the diary line gets only that.
+        // Scripts and Claudian also need the diary page, since they are given its location.
+        internal static NowDoingActions Build(NowDoingSettings settings, NowDoingView view, DateTime openedAt, string backup, string message, string appFolder)
+        {
+            string workdir = string.IsNullOrEmpty(settings.Workdir) ? appFolder : settings.Workdir;
+            string note = view.Path;
+            var actions = new NowDoingActions
+            {
+                Write = text => NowDoingNote.Write(settings, openedAt, text, backup),
+                Describe = failure => NowDoingNote.Message(failure, settings),
+                Buttons = settings.Buttons,
+                Notice = NowDoingButton.Problem(settings.BadButtons),
+                Copy = command => NowDoingScript.RunAsync(command, note == null ? new string[0] : new[] { "--note", note }, workdir, NowDoingScriptLimits.Copy, CancellationToken.None),
+                SetClipboard = SetClipboard,
+                OpenApp = AppLinks.Open
+            };
+            if (settings.Claudian && note != null)
+                actions.Send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(note), NowDoingNote.OpenLink, note: note);
+            if (settings.List != null && note != null)
+                actions.List = token => NowDoingScript.RunAsync(settings.List, new[] { "--note", note }, workdir, NowDoingScriptLimits.List, token);
+            if (settings.After != null && note != null)
+            {
+                string time = openedAt.ToString("HH:mm", CultureInfo.InvariantCulture);
+                actions.After = (mode, text) => NowDoingScript.RunAsync(settings.After, new[] { "--note", note, "--time", time, "--mode", mode, "--text", text },
+                    workdir, NowDoingScriptLimits.After, CancellationToken.None);
+            }
+            return actions;
+        }
+
         // Runs `AIUsageManager.exe --now-doing` (or `--now-doing-tap` from a double press): one window at a time per user,
         // separate from the tray app.
         public static void Run(bool doublePress)
@@ -582,28 +612,7 @@ namespace AIUsageManager
                     NowDoingView view = NowDoingNote.Look(settings, openedAt);
                     string message = NowDoingNote.ClaudianMessagePath(localAppData);
                     NowDoingNote.DropStaleMessage(message, DateTime.UtcNow);
-                    string workdir = string.IsNullOrEmpty(settings.Workdir) ? AppDomain.CurrentDomain.BaseDirectory : settings.Workdir;
-                    string note = view.Path;
-                    var actions = new NowDoingActions
-                    {
-                        Write = text => NowDoingNote.Write(settings, openedAt, text, backup),
-                        Describe = failure => NowDoingNote.Message(failure, settings),
-                        Buttons = settings.Buttons,
-                        Notice = NowDoingButton.Problem(settings.BadButtons),
-                        Copy = command => NowDoingScript.RunAsync(command, note == null ? new string[0] : new[] { "--note", note }, workdir, NowDoingScriptLimits.Copy, CancellationToken.None),
-                        SetClipboard = SetClipboard,
-                        OpenApp = AppLinks.Open
-                    };
-                    if (settings.Claudian && note != null)
-                        actions.Send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(note), NowDoingNote.OpenLink, note: note);
-                    if (settings.List != null && note != null)
-                        actions.List = token => NowDoingScript.RunAsync(settings.List, new[] { "--note", note }, workdir, NowDoingScriptLimits.List, token);
-                    if (settings.After != null && note != null)
-                    {
-                        string time = openedAt.ToString("HH:mm", CultureInfo.InvariantCulture);
-                        actions.After = (mode, text) => NowDoingScript.RunAsync(settings.After, new[] { "--note", note, "--time", time, "--mode", mode, "--text", text },
-                            workdir, NowDoingScriptLimits.After, CancellationToken.None);
-                    }
+                    NowDoingActions actions = Build(settings, view, openedAt, backup, message, AppDomain.CurrentDomain.BaseDirectory);
                     Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                     Application.Run(new NowDoingForm(openedAt, view, actions, ThemePalette.Resolve(themes.Load())) { OpenedByDoublePress = doublePress });
                 }

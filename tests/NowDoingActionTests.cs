@@ -245,8 +245,30 @@ internal static partial class Tests
         });
     }
 
+    static void RunNowDoingOffTests()
+    {
+        var opened = new DateTime(2026, 11, 24, 10, 0, 0);
+        var page = new NowDoingView { Path = @"C:\Notes\2026-11-24.md" };
+        string full = "now_doing_claudian=on\nnow_doing_after=python a.py\nnow_doing_list=python l.py\nnow_doing_button1=x|text:y\nnow_doing_button2=bad\n";
+        Check("Without the settings the window runs no script, sends nothing and shows no buttons", () => {
+            NowDoingActions none = NowDoingForm.Build(NowDoingSettings.Parse("now_doing_note=C:\\Notes\\{yyyy-MM-dd}.md\n"), page, opened, @"C:\b.md", @"C:\m.json", @"C:\App");
+            Assert(none.Write != null && none.After == null && none.List == null && none.Send == null && none.Buttons.All(b => b == null) && none.Notice == null);
+        });
+        Check("Each setting turns on only its own part of the window", () => {
+            NowDoingActions all = NowDoingForm.Build(NowDoingSettings.Parse(full), page, opened, @"C:\b.md", @"C:\m.json", @"C:\App");
+            Assert(all.After != null && all.List != null && all.Send != null && all.Buttons[0] != null && all.Notice == "settings.ini の now_doing_button2 の書き方が違います");
+            NowDoingActions after = NowDoingForm.Build(NowDoingSettings.Parse("now_doing_after=python a.py\n"), page, opened, @"C:\b.md", @"C:\m.json", @"C:\App");
+            Assert(after.After != null && after.List == null && after.Send == null);
+        });
+        Check("Without a diary page no script runs and nothing is sent, even when they are set", () => {
+            NowDoingActions nopage = NowDoingForm.Build(NowDoingSettings.Parse(full), new NowDoingView(), opened, @"C:\b.md", @"C:\m.json", @"C:\App");
+            Assert(nopage.After == null && nopage.List == null && nopage.Send == null);
+        });
+    }
+
     static void RunNowDoingActionTests()
     {
+        RunNowDoingOffTests();
         RunDoubleTapTests();
         RunNowDoingScriptTests();
         Check("Buttons are read in their three forms", () => {

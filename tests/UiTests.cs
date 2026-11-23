@@ -117,6 +117,19 @@ internal static class UiTests
         }
         using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
         {
+            // Someone who has not set up いまやってること gets none of it from the tray app.
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse(""));
+            Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey")==null&&Field<AiDoneLog>(tray,"aiDone")==null,"Without the settings the tray app watches no keys and writes no AI done lines");
+            tray.ExitThread();
+        }
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse("now_doing_ai_done=on\n"));
+            Assert(Field<AiDoneLog>(tray,"aiDone")!=null&&Field<DoubleTapHook>(tray,"nowDoingTap")==null,"now_doing_ai_done=on turns on only the AI done lines");
+            tray.ExitThread();
+        }
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
             var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoingHotkey:"Ctrl+Alt+Shift+F23");
             Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey").Registered,"A shortcut key setting installs no keyboard hook");
             tray.ExitThread();
