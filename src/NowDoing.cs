@@ -49,7 +49,7 @@ namespace AIUsageManager
         }
     }
 
-    internal enum NowDoingFailure { None, NoSetting, BadSetting, NoNote, NoHeading, BadEncoding, Busy }
+    internal enum NowDoingFailure { None, NoSetting, BadSetting, NoNote, NoHeading, BadEncoding, Busy, NoBackup, WriteFailed }
 
     // One 📝 record of the 日中ログ: the start time (HH:MM) and the text after 📝.
     internal sealed class NowDoingRecord
@@ -86,6 +86,8 @@ namespace AIUsageManager
                 case NowDoingFailure.NoHeading: return "「" + (settings == null ? NowDoingSettings.DefaultHeading : settings.Heading) + "」が見つかりません";
                 case NowDoingFailure.BadEncoding: return "日誌の文字コードを読めません";
                 case NowDoingFailure.Busy: return "日誌が使用中です。もう一度 Enter を押してください";
+                case NowDoingFailure.NoBackup: return "書く前の控えを残せないため、書きませんでした";
+                case NowDoingFailure.WriteFailed: return "書き込みが途中で失敗しました。日誌を確かめてください（書く前の中身は now-doing-last.md）";
                 default: return "";
             }
         }
@@ -98,16 +100,25 @@ namespace AIUsageManager
             return value;
         }
 
-        // `{…}` holds a .NET date format, e.g. C:\Notes\{yyyy}年_日誌\{yyyy-MM-dd} - 日誌.md. Null when the pattern is unusable.
+        // `{…}` holds a .NET date format, e.g. C:\Notes\{yyyy}年_日誌\{yyyy-MM-dd} - 日誌.md. Null when the pattern is unusable,
+        // including a format that leaves `:` or `?` in a folder or file name (such as {HH:mm}).
         public static string NotePath(string pattern, DateTime date)
         {
             try
             {
                 string path = Field.Replace(pattern, m => date.ToString(m.Groups[1].Value, CultureInfo.InvariantCulture));
-                return Path.IsPathRooted(path) && path.IndexOfAny(Path.GetInvalidPathChars()) < 0 ? path : null;
+                if (!Path.IsPathRooted(path) || path.IndexOfAny(Path.GetInvalidPathChars()) >= 0) return null;
+                foreach (string part in path.Substring(Path.GetPathRoot(path).Length).Split('\\', '/'))
+                    if (part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) return null;
+                if (Path.GetFileName(path).Length == 0) return null;
+                Path.GetFullPath(path);
+                return path;
             }
             catch (FormatException) { return null; }
             catch (ArgumentException) { return null; }
+            catch (NotSupportedException) { return null; }
+            catch (PathTooLongException) { return null; }
+            catch (SecurityException) { return null; }
         }
 
         sealed class Line { public string Text, End; }
@@ -128,15 +139,28 @@ namespace AIUsageManager
         }
         static bool Blank(Line line) { return line.Text.Trim().Length == 0; }
 
-        // The heading line and the line after the section. The section ends before the next `## ` heading or the
-        // configured end line, whichever comes first.
+        // The level of a Markdown heading line (`## x` is 2), or 0 for any other line.
+        static int Level(string line)
+        {
+            int n = 0;
+            while (n < line.Length && line[n] == '#') n++;
+            return n > 0 && n < line.Length && line[n] == ' ' ? n : 0;
+        }
+
+        // The heading line and the line after the section. The section ends before the next heading of the same or a
+        // higher level (for `## 📝 日中ログ`, the next `# ` or `## ` line) or the configured end line, whichever comes first.
         static bool Section(List<Line> lines, NowDoingSettings settings, out int heading, out int end)
         {
             heading = lines.FindIndex(l => l.Text == settings.Heading);
             end = lines.Count;
             if (heading < 0) return false;
+            int level = Level(settings.Heading);
+            if (level == 0) level = 2;
             for (int i = heading + 1; i < lines.Count; i++)
-                if (lines[i].Text.StartsWith("## ", StringComparison.Ordinal) || (!string.IsNullOrEmpty(settings.Before) && lines[i].Text.StartsWith(settings.Before, StringComparison.Ordinal))) { end = i; break; }
+            {
+                int other = Level(lines[i].Text);
+                if ((other > 0 && other <= level) || (!string.IsNullOrEmpty(settings.Before) && lines[i].Text.StartsWith(settings.Before, StringComparison.Ordinal))) { end = i; break; }
+            }
             return true;
         }
 
@@ -179,9 +203,13 @@ namespace AIUsageManager
             int blanks = next;
             while (blanks > heading + 1 && Blank(lines[blanks - 1])) blanks--;
             int run = next - blanks;
-            // New lines use the file's own line break (the first one found; LF for a file without any).
-            string newline = "\n";
-            foreach (Line l in lines) if (l.End.Length > 0) { newline = l.End; break; }
+            int at = run == 0 ? next : blanks + 1;
+            // New lines use the line break of the lines around them (files can mix LF and CRLF); otherwise the first
+            // one in the file, and LF for a file without any.
+            string newline = null;
+            if (at > 0 && lines[at - 1].End.Length > 0) newline = lines[at - 1].End;
+            else if (at < lines.Count && lines[at].End.Length > 0) newline = lines[at].End;
+            if (newline == null) { newline = "\n"; foreach (Line l in lines) if (l.End.Length > 0) { newline = l.End; break; } }
             bool atEnd = next == lines.Count;
             var added = new List<Line>();
             if (run == 0) added.Add(new Line { Text = "", End = newline });
@@ -189,7 +217,6 @@ namespace AIUsageManager
             added.Add(new Line { Text = "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", End = newline });
             added.Add(new Line { Text = Mark + " " + text, End = newline });
             if (run <= 1 && !atEnd) added.Add(new Line { Text = "", End = newline });
-            int at = run == 0 ? next : blanks + 1;
             if (at == lines.Count && lines.Count > 0 && lines[lines.Count - 1].End.Length == 0)
             {
                 // A file without a final line break keeps having none.
@@ -252,49 +279,92 @@ namespace AIUsageManager
             string path = NotePath(settings.Note, openedAt);
             if (path == null) return NowDoingFailure.BadSetting;
             if (!File.Exists(path)) return NowDoingFailure.NoNote;
-            if (string.IsNullOrEmpty(backupPath)) return NowDoingFailure.Busy;
+            if (string.IsNullOrEmpty(backupPath)) return NowDoingFailure.NoBackup;
             for (int attempt = 1; ; attempt++)
             {
-                bool retry = false;
+                FileStream file = null;
+                byte[] old = null;
                 try
                 {
-                    using (var file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read))
-                    {
-                        var old = new byte[file.Length];
-                        int read = 0;
-                        while (read < old.Length) { int n = file.Read(old, read, old.Length - read); if (n == 0) break; read += n; }
-                        if (read != old.Length) return NowDoingFailure.Busy;
-                        bool bom;
-                        string content;
-                        if (!Decode(old, out bom, out content)) return NowDoingFailure.BadEncoding;
-                        NowDoingFailure failure;
-                        string updated = Insert(content, openedAt, text, settings, out failure);
-                        if (updated == null) return failure;
-                        byte[] body = new UTF8Encoding(false).GetBytes(updated);
-                        var bytes = new byte[(bom ? 3 : 0) + body.Length];
-                        if (bom) Buffer.BlockCopy(Bom, 0, bytes, 0, 3);
-                        Buffer.BlockCopy(body, 0, bytes, bom ? 3 : 0, body.Length);
-                        Directory.CreateDirectory(Path.GetDirectoryName(backupPath));
-                        File.WriteAllBytes(backupPath, old);
-                        // Only the bytes from the first change onward are rewritten.
-                        int same = 0;
-                        while (same < old.Length && same < bytes.Length && old[same] == bytes[same]) same++;
-                        file.Position = same;
-                        file.Write(bytes, same, bytes.Length - same);
-                        file.SetLength(bytes.Length);
-                        file.Flush(true);
-                        return NowDoingFailure.None;
-                    }
+                    file = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+                    old = new byte[file.Length];
+                    int read = 0;
+                    while (read < old.Length) { int n = file.Read(old, read, old.Length - read); if (n == 0) break; read += n; }
+                    if (read != old.Length) { Close(file); return NowDoingFailure.Busy; }
                 }
-                catch (FileNotFoundException) { return NowDoingFailure.NoNote; }
-                catch (DirectoryNotFoundException) { return NowDoingFailure.NoNote; }
-                catch (IOException) { retry = true; }
-                catch (UnauthorizedAccessException) { retry = true; }
-                catch (SecurityException) { retry = true; }
-                // Another app may be writing the diary: up to three tries, 0.3 s apart.
-                if (!retry || attempt >= 3) return NowDoingFailure.Busy;
+                catch (FileNotFoundException) { Close(file); return NowDoingFailure.NoNote; }
+                catch (DirectoryNotFoundException) { Close(file); return NowDoingFailure.NoNote; }
+                catch (IOException) { Close(file); file = null; }
+                catch (UnauthorizedAccessException) { Close(file); file = null; }
+                catch (SecurityException) { Close(file); file = null; }
+                if (file != null)
+                {
+                    try { return Change(file, old, settings, openedAt, text, backupPath); }
+                    finally { Close(file); }
+                }
+                // Another app may be writing the diary. Nothing has been changed yet, so it is tried again:
+                // up to three tries, 0.3 s apart.
+                if (attempt >= 3) return NowDoingFailure.Busy;
                 if (sleep != null) sleep(300); else Thread.Sleep(300);
             }
+        }
+
+        static void Close(FileStream file)
+        {
+            if (file == null) return;
+            try { file.Dispose(); }
+            catch (IOException) { }
+        }
+
+        // Adds the record to the open diary. The backup is written before the diary is touched; once writing the diary
+        // has started, a failure is reported as it is and never retried, so the record is not added twice and the
+        // backup keeps the content from before.
+        static NowDoingFailure Change(FileStream file, byte[] old, NowDoingSettings settings, DateTime openedAt, string text, string backupPath)
+        {
+            bool bom;
+            string content;
+            if (!Decode(old, out bom, out content)) return NowDoingFailure.BadEncoding;
+            NowDoingFailure failure;
+            string updated = Insert(content, openedAt, text, settings, out failure);
+            if (updated == null) return failure;
+            byte[] body = new UTF8Encoding(false).GetBytes(updated);
+            var bytes = new byte[(bom ? 3 : 0) + body.Length];
+            if (bom) Buffer.BlockCopy(Bom, 0, bytes, 0, 3);
+            Buffer.BlockCopy(body, 0, bytes, bom ? 3 : 0, body.Length);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath));
+                File.WriteAllBytes(backupPath, old);
+            }
+            catch (IOException) { return NowDoingFailure.NoBackup; }
+            catch (UnauthorizedAccessException) { return NowDoingFailure.NoBackup; }
+            catch (SecurityException) { return NowDoingFailure.NoBackup; }
+            try
+            {
+                // Only the bytes from the first change onward are rewritten.
+                int same = 0;
+                while (same < old.Length && same < bytes.Length && old[same] == bytes[same]) same++;
+                file.Position = same;
+                file.Write(bytes, same, bytes.Length - same);
+                file.SetLength(bytes.Length);
+                file.Flush(true);
+                return NowDoingFailure.None;
+            }
+            catch (IOException) { return NowDoingFailure.WriteFailed; }
+            catch (UnauthorizedAccessException) { return NowDoingFailure.WriteFailed; }
+        }
+
+        // A message for Claudian that nothing took (no plugin, another vault…) is removed the next time the window opens.
+        public static void DropStaleMessage(string messagePath, DateTime nowUtc)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(messagePath) && File.Exists(messagePath) && nowUtc - File.GetLastWriteTimeUtc(messagePath) > TimeSpan.FromMinutes(2))
+                    File.Delete(messagePath);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (SecurityException) { }
         }
 
         public static string BackupPath(string localAppData)

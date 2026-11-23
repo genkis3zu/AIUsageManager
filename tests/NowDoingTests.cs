@@ -220,6 +220,56 @@ internal static partial class Tests
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), false) == "ショートカット「Ctrl+Alt+N」は、ほかのアプリが使っているため使えません");
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), true) == null);
         });
+        Check("A date format or name that makes an unusable path is a bad setting, not a crash", () => {
+            var day = new DateTime(2026, 11, 24, 10, 40, 0);
+            foreach (string bad in new[] { @"C:\N\{HH:mm}.md", @"C:\N\{t}.md", @"C:\N\a?.md", @"C:\N\a*.md", @"C:\N\{yyyy}\", @"C:\N\x:y\a.md" })
+                Assert(NowDoingNote.NotePath(bad, day) == null);
+            Assert(NowDoingNote.NotePath(@"C:\N\{yyyy-MM-dd HH.mm}.md", day) == @"C:\N\2026-11-24 10.40.md");
+            NowDoingView view = NowDoingNote.Look(new NowDoingSettings { Note = @"C:\N\{HH:mm}.md" }, day);
+            Assert(view.Failure == NowDoingFailure.BadSetting && view.Path == null);
+            Assert(NowDoingNote.Write(new NowDoingSettings { Note = @"C:\N\a?.md" }, day, "x", backup) == NowDoingFailure.BadSetting);
+        });
+        Check("The section ends at the next heading of the same or a higher level", () => {
+            string top = Lines("## 📝 日中ログ", "", "[09:00]", "朝", "", "# 次の大見出し", "[10:30] 外");
+            Assert(AddAt(top, 10, 0, "x", new NowDoingSettings()) == Lines("## 📝 日中ログ", "", "[09:00]", "朝", "", "[10:00]", "📝 x", "", "# 次の大見出し", "[10:30] 外"));
+            string deep = Lines("### A", "[09:00]", "m", "### B", "other", "#### C");
+            Assert(AddAt(deep, 10, 40, "x", new NowDoingSettings { Heading = "### A" }) == Lines("### A", "[09:00]", "m", "", "[10:40]", "📝 x", "", "### B", "other", "#### C"));
+            // A deeper heading inside the section does not end it, and #tags are not headings.
+            string inner = Lines("## 📝 日中ログ", "", "[09:00]", "#タグ", "### 午前", "[11:00]", "昼前", "", "## 次");
+            Assert(AddAt(inner, 10, 0, "x", new NowDoingSettings()) == Lines("## 📝 日中ログ", "", "[09:00]", "#タグ", "### 午前", "", "[10:00]", "📝 x", "", "[11:00]", "昼前", "", "## 次"));
+        });
+        Check("New lines take the line break of the lines around them", () => {
+            string mixed = "---\ntags: [x]\n---\r\n## 📝 日中ログ\r\n\r\n[09:00]\r\n朝\r\n\r\n## 次\r\n";
+            Assert(AddAt(mixed, 10, 0, "x", new NowDoingSettings()) == mixed.Replace("朝\r\n\r\n## 次", "朝\r\n\r\n[10:00]\r\n📝 x\r\n\r\n## 次"));
+        });
+        Check("Without a place for the backup nothing is written", () => {
+            string diary = Path.Combine(dir, "nobackup.md");
+            File.WriteAllText(diary, note);
+            string blocker = Path.Combine(dir, "blocker.txt");
+            File.WriteAllText(blocker, "a file where the backup folder would be");
+            Assert(NowDoingNote.Write(at("nobackup.md"), opened, "x", Path.Combine(blocker, "now-doing-last.md")) == NowDoingFailure.NoBackup && File.ReadAllText(diary) == note);
+            Assert(NowDoingNote.Write(at("nobackup.md"), opened, "x", null) == NowDoingFailure.NoBackup && File.ReadAllText(diary) == note);
+            Assert(NowDoingNote.Message(NowDoingFailure.NoBackup, null) == "書く前の控えを残せないため、書きませんでした");
+            Assert(NowDoingNote.Message(NowDoingFailure.WriteFailed, null) == "書き込みが途中で失敗しました。日誌を確かめてください（書く前の中身は now-doing-last.md）");
+        });
+        Check("A Claudian message nothing took is removed when the window opens after two minutes", () => {
+            string message = Path.Combine(dir, "stale", "claudian-message.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(message));
+            File.WriteAllText(message, "{}");
+            DateTime written = File.GetLastWriteTimeUtc(message);
+            NowDoingNote.DropStaleMessage(message, written.AddSeconds(119));
+            Assert(File.Exists(message));
+            NowDoingNote.DropStaleMessage(message, written.AddSeconds(121));
+            Assert(!File.Exists(message));
+            NowDoingNote.DropStaleMessage(message, written.AddSeconds(121));
+            NowDoingNote.DropStaleMessage(null, DateTime.UtcNow);
+        });
+        Check("A settings.ini that is not UTF-8 is never rewritten", () => {
+            string ini = Path.Combine(dir, "sjis.ini");
+            byte[] sjis = { 0x6E, 0x6F, 0x77, 0x5F, 0x64, 0x6F, 0x69, 0x6E, 0x67, 0x5F, 0x6E, 0x6F, 0x74, 0x65, 0x3D, 0x43, 0x3A, 0x5C, 0x93, 0xFA, 0x8E, 0x8F, 0x0D, 0x0A };
+            File.WriteAllBytes(ini, sjis);
+            Assert(!new ThemeSettings(ini).Save(ThemeMode.Dark) && Convert.ToBase64String(File.ReadAllBytes(ini)) == Convert.ToBase64String(sjis));
+        });
         try { Directory.Delete(dir, true); } catch (IOException) { }
     }
 }

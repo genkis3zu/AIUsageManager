@@ -120,7 +120,7 @@ internal static class UiTests
         var written=new List<string>();var results=new Queue<NowDoingFailure>(new[]{NowDoingFailure.Busy,NowDoingFailure.None});
         var opened=new DateTime(2026,11,24,11,5,0);
         var view=new NowDoingView{Path=@"C:\Notes\2026年_日誌\2026-11-24 - 日誌.md",Heading="## 📝 日中ログ"};
-        string[] samples={"メールの返信","見積の表を直している","ClaudeCodeコーディング、他のAIでの開発など","昼休み","ケーズデンキへ行って、頭皮サロン用の機器を買う","資料を読む","ストレッチ","会議の準備をしている。長い文は最後が省略されて1行に収まることを確かめるための文"};
+        string[] samples={"メールの返信","見積の表を直している","設計メモを書いている","昼休み","買い物に出る","資料を読む","ストレッチ","会議の準備をしている。長い文は最後が省略されて1行に収まることを確かめるための文"};
         for(int i=0;i<8;i++)view.Records.Add(new NowDoingRecord{Time=(9+i/2).ToString("00")+":"+(i%2*30).ToString("00"),Text=samples[i]});
         using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return results.Dequeue();},f=>NowDoingNote.Message(f,null),ThemePalette.Light))
         {

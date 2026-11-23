@@ -90,6 +90,7 @@ namespace AIUsageManager
         static Font Make(float size, bool bold) { return new Font("Yu Gothic UI", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel); }
         float ContentHeight { get { return HasList ? ListTop + 34 + Math.Max(1, shown.Count) * RowHeight + 14 : StatusTop + 20 + 16; } }
 
+        bool placed;
         void Arrange()
         {
             scale = DeviceDpi / 96f;
@@ -102,15 +103,16 @@ namespace AIUsageManager
             Rectangle field = Box(Pad, FieldTop, Width96 - 2 * Pad, FieldHeight);
             input.SetBounds(field.Left + Px(12), field.Top + (field.Height - input.Height) / 2, field.Width - Px(24), input.Height);
             close.SetBounds(Px(Width96 - 12 - 30), Px(10), Px(30), Px(30));
-            // In the middle of the screen that has the mouse pointer.
+            // In the middle of the screen that has the mouse pointer; once shown, it stays where it is (it may be dragged).
+            if (placed) return;
             Rectangle area = Screen.FromPoint(Cursor.Position).WorkingArea;
             Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
         }
 
         protected override void OnLoad(EventArgs e) { Arrange(); base.OnLoad(e); }
-        // Moving to the mouse's screen can change the scale; the window is laid out again for it.
+        // Moving to a screen with another scale lays the window out again for it.
         protected override void OnDpiChanged(DpiChangedEventArgs e) { base.OnDpiChanged(e); Arrange(); Invalidate(); }
-        protected override void OnShown(EventArgs e) { base.OnShown(e); Activate(); input.Focus(); }
+        protected override void OnShown(EventArgs e) { base.OnShown(e); placed = true; Activate(); input.Focus(); }
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
@@ -264,6 +266,7 @@ namespace AIUsageManager
                     NowDoingSettings settings = NowDoingSettings.Load(settingsPath);
                     NowDoingView view = NowDoingNote.Look(settings, openedAt);
                     string message = NowDoingNote.ClaudianMessagePath(localAppData);
+                    NowDoingNote.DropStaleMessage(message, DateTime.UtcNow);
                     Func<string, bool> send = null;
                     if (settings.Claudian && view.Path != null)
                         send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(view.Path), NowDoingNote.OpenLink);

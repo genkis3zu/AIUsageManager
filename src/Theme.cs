@@ -70,14 +70,22 @@ namespace AIUsageManager
                 string waitingValue=waiting==WaitingNoticeMode.Off?"off":waiting==WaitingNoticeMode.Frequent?"frequent":"standard";
                 // Lines this class does not own (e.g. the now_doing_ keys) are kept as they are.
                 var text=new System.Text.StringBuilder("theme=" + value + Environment.NewLine+"notifications="+alertValue+Environment.NewLine+"waiting="+waitingValue+Environment.NewLine);
-                if (File.Exists(path))
-                    foreach(string raw in File.ReadAllText(path).Split('\n')) {
-                        string line=raw.TrimEnd('\r');
-                        int equals=line.IndexOf('=');
-                        string key=equals<0?line.Trim():line.Substring(0,equals).Trim();
-                        if(line.Trim().Length==0||key=="theme"||key=="notifications"||key=="waiting")continue;
-                        text.Append(line).Append(Environment.NewLine);
-                    }
+                // A settings.ini that is not UTF-8 is never rewritten: its other lines (such as a diary path in Japanese)
+                // would be damaged. The choice then applies only until the app closes.
+                string existing="";
+                if (File.Exists(path)) {
+                    byte[] bytes=File.ReadAllBytes(path);
+                    bool bom=bytes.Length>=3&&bytes[0]==0xEF&&bytes[1]==0xBB&&bytes[2]==0xBF;
+                    try { existing=new System.Text.UTF8Encoding(false,true).GetString(bytes,bom?3:0,bytes.Length-(bom?3:0)); }
+                    catch (System.Text.DecoderFallbackException) { return false; }
+                }
+                foreach(string raw in existing.Split('\n')) {
+                    string line=raw.TrimEnd('\r');
+                    int equals=line.IndexOf('=');
+                    string key=equals<0?line.Trim():line.Substring(0,equals).Trim();
+                    if(line.Trim().Length==0||key=="theme"||key=="notifications"||key=="waiting")continue;
+                    text.Append(line).Append(Environment.NewLine);
+                }
                 File.WriteAllText(path + ".tmp", text.ToString());
                 if (File.Exists(path)) File.Replace(path + ".tmp", path, null);
                 else File.Move(path + ".tmp", path);

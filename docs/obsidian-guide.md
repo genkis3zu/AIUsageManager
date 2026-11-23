@@ -32,7 +32,7 @@ Stream Deck の「いまやってること」の窓で Ctrl+Enter を押すと�
 - 送り先は、Claudian のチャットで開いているタブです。チャットが閉じていれば開きます。Obsidian が前に出ます。
 - Claudian が見つからないときや、受け取れないときは、Obsidian の右上に理由を出します。
 - Claudian には外から文を受け取る仕組みがないため、Claudian 自身の Enter キーと同じ部分を使って送ります。Claudian を更新すると送れなくなることがあります（そのときは「Claudian の版が変わった可能性があります」と出ます）。Claudian 1.3.64 の作りに合わせています。
-- このプラグインは `obsidian://ai-usage-manager-claudian` で始まるリンクを受け付けます。リンクには1回だけ使える合言葉しか入っておらず、文そのものは窓が `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、このプラグインが受け取ると消します。合言葉が合わないリンク（Web ページやノートに書かれたものなど）では何も送りません。
+- このプラグインは `obsidian://ai-usage-manager-claudian` で始まるリンクを受け付けます。リンクには1回だけ使える合言葉しか入っておらず、文そのものは窓が `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、このプラグインが受け取ると消します。合言葉が合わないリンク（Web ページやノートに書かれたものなど）では何も送りません。受け取られなかったファイルは、次に窓を開いたとき、2分を過ぎていれば窓が消します。
 
 ## 必要なもの
 
