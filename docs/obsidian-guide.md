@@ -25,6 +25,15 @@
 
 「未取得」と取得済みの0%は区別します。15分以上前の値、取得失敗、リセット期限経過は現在の警告として扱いません。常駐アプリへの接続が切れた場合は「アプリ未接続」と表示します。
 
+### Claudian に送る（「いまやってること」キーの Ctrl+Enter）
+
+Stream Deck の「いまやってること」の窓で Ctrl+Enter を押すと、日誌に書いたあと、同じ文を Claudian（Obsidian の中で Claude Code を使うプラグイン）のチャットに新しいメッセージとして送ります。`settings.ini` に `now_doing_claudian=on` を書いたときだけ使えます（[Stream Deck のガイド](streamdeck-guide.md)）。
+
+- 送り先は、Claudian のチャットで開いているタブです。チャットが閉じていれば開きます。Obsidian が前に出ます。
+- Claudian が見つからないときや、受け取れないときは、Obsidian の右上に理由を出します。
+- Claudian には外から文を受け取る仕組みがないため、Claudian 自身の Enter キーと同じ部分を使って送ります。Claudian を更新すると送れなくなることがあります（そのときは「Claudian の版が変わった可能性があります」と出ます）。Claudian 1.3.64 の作りに合わせています。
+- このプラグインは `obsidian://ai-usage-manager-claudian` で始まるリンクを受け付けます。リンクには1回だけ使える合言葉しか入っておらず、文そのものは窓が `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、このプラグインが受け取ると消します。合言葉が合わないリンク（Web ページやノートに書かれたものなど）では何も送りません。
+
 ## 必要なもの
 
 - Windows版Obsidian 1.5.0以降（実機確認：1.14.4）。モバイル・macOS・Linuxは対象外です。

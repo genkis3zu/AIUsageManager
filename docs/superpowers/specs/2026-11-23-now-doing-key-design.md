@@ -157,3 +157,4 @@
 - 窓を開いたときに日誌を読み、書けない理由があればその場で赤で出す。
 - 窓の下に、その日の日中ログにある 📝 の記録を新しいものから6件まで出す。
 - 窓をタイトルバーのない形にし、トレイの窓と同じ色・角の丸みにした。空いているところをドラッグすると動かせる。
+- `now_doing_claudian=on` のとき、Ctrl+Enter で日誌に書いたあと、同じ文を Claudian のチャットに送る。窓は文と1回だけ使える合言葉を `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、合言葉だけを入れた `obsidian://ai-usage-manager-claudian` のリンクを開く。AI Usage Manager の Obsidian プラグインが、合言葉が合うときだけ文を受け取り、Claudian の入力と同じ部分（`inputController.sendMessage`）で送る。Claudian に公開の受け口がないため、Claudian の更新で送れなくなることがある。通信は増えない（Claudian が送るのは Claudian 自身の通信）。

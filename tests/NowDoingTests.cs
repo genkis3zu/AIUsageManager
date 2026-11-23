@@ -178,6 +178,33 @@ internal static partial class Tests
             string saved = File.ReadAllText(ini);
             Assert(saved.Split(new[] { "theme=" }, StringSplitOptions.None).Length == 2 && saved.Split(new[] { "now_doing_note=" }, StringSplitOptions.None).Length == 2);
         });
+        Check("Sending to Claudian is on only with now_doing_claudian=on", () => {
+            Assert(NowDoingSettings.Parse("now_doing_claudian=on\n").Claudian && !NowDoingSettings.Parse("now_doing_claudian=off\n").Claudian && !NowDoingSettings.Parse("").Claudian);
+        });
+        Check("The vault is the nearest folder above the diary with a .obsidian folder", () => {
+            string vault = Path.Combine(dir, "My Vault");
+            Directory.CreateDirectory(Path.Combine(vault, ".obsidian"));
+            Directory.CreateDirectory(Path.Combine(vault, "notes", "2026"));
+            Assert(NowDoingNote.VaultName(Path.Combine(vault, "notes", "2026", "2026-11-24.md")) == "My Vault");
+            Assert(NowDoingNote.VaultName(Path.Combine(dir, "no-vault", "note.md")) == null);
+        });
+        Check("The Obsidian link carries only the vault and the token", () => {
+            Assert(NowDoingNote.ClaudianLink("0123456789abcdef0123456789abcdef", "My Vault") == "obsidian://ai-usage-manager-claudian?vault=My%20Vault&token=0123456789abcdef0123456789abcdef");
+            Assert(NowDoingNote.ClaudianLink("ab", null) == "obsidian://ai-usage-manager-claudian?token=ab");
+            string a = NowDoingNote.NewToken(), b = NowDoingNote.NewToken();
+            Assert(a.Length == 32 && a != b && System.Text.RegularExpressions.Regex.IsMatch(a, "^[0-9a-f]{32}$"));
+        });
+        Check("The text is left with its token for the plugin, and removed again when Obsidian cannot be opened", () => {
+            string message = Path.Combine(dir, "local", "AIUsageManager", "claudian-message.json");
+            var links = new System.Collections.Generic.List<string>();
+            Assert(NowDoingNote.HandToClaudian("見積の表を直している", message, "My Vault", link => { links.Add(link); return true; }, "0123456789abcdef0123456789abcdef", 1800000000000));
+            Assert(links.Count == 1 && links[0] == "obsidian://ai-usage-manager-claudian?vault=My%20Vault&token=0123456789abcdef0123456789abcdef");
+            var data = (System.Collections.Generic.Dictionary<string, object>)new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject(File.ReadAllText(message, Encoding.UTF8));
+            Assert((string)data["token"] == "0123456789abcdef0123456789abcdef" && (string)data["text"] == "見積の表を直している" && Convert.ToInt64(data["created"]) == 1800000000000);
+            Assert(!NowDoingNote.HandToClaudian("x", message, null, link => false) && !File.Exists(message));
+            Assert(!NowDoingNote.HandToClaudian("x", null, null, link => { links.Add(link); return true; }) && links.Count == 1);
+            Assert(NowDoingNote.ClaudianMessagePath(@"C:\Users\a\AppData\Local") == @"C:\Users\a\AppData\Local\AIUsageManager\claudian-message.json" && NowDoingNote.ClaudianMessagePath("") == null);
+        });
         try { Directory.Delete(dir, true); } catch (IOException) { }
     }
 }

@@ -16,6 +16,8 @@ namespace AIUsageManager
         public string Note;
         public string Heading = DefaultHeading;
         public string Before;
+        // now_doing_claudian=on: Ctrl+Enter also hands the line to Claudian through the Obsidian plugin.
+        public bool Claudian;
 
         public static NowDoingSettings Parse(string ini)
         {
@@ -30,6 +32,7 @@ namespace AIUsageManager
                 if (key == "now_doing_note") settings.Note = value;
                 else if (key == "now_doing_heading") settings.Heading = value;
                 else if (key == "now_doing_before") settings.Before = value;
+                else if (key == "now_doing_claudian") settings.Claudian = value == "on";
             }
             return settings;
         }
@@ -294,6 +297,75 @@ namespace AIUsageManager
         public static string BackupPath(string localAppData)
         {
             return string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "AIUsageManager", "now-doing-last.md");
+        }
+
+        // ---- Handing a line to Claudian (Ctrl+Enter, only with now_doing_claudian=on) ----
+        // The text is left in a file under %LOCALAPPDATA% with a one-time token, and obsidian://ai-usage-manager-claudian
+        // is opened with only that token. The AIUsageManager Obsidian plugin takes the text (and removes the file) only
+        // when the token matches, so a link elsewhere cannot make Claudian run a prompt.
+        public const string ClaudianAction = "ai-usage-manager-claudian";
+
+        public static string ClaudianMessagePath(string localAppData)
+        {
+            return string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "AIUsageManager", "claudian-message.json");
+        }
+
+        // The vault that holds the diary: the nearest folder above it with a .obsidian folder. Null when there is none.
+        public static string VaultName(string notePath)
+        {
+            try
+            {
+                for (string dir = Path.GetDirectoryName(notePath); !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
+                    if (Directory.Exists(Path.Combine(dir, ".obsidian"))) { string name = Path.GetFileName(dir); return name.Length == 0 ? null : name; }
+            }
+            catch (ArgumentException) { }
+            catch (PathTooLongException) { }
+            catch (SecurityException) { }
+            return null;
+        }
+
+        public static string ClaudianLink(string token, string vault)
+        {
+            return "obsidian://" + ClaudianAction + "?" + (string.IsNullOrEmpty(vault) ? "" : "vault=" + Uri.EscapeDataString(vault) + "&") + "token=" + token;
+        }
+
+        public static string NewToken()
+        {
+            var bytes = new byte[16];
+            using (var random = System.Security.Cryptography.RandomNumberGenerator.Create()) random.GetBytes(bytes);
+            var hex = new StringBuilder(32);
+            foreach (byte b in bytes) hex.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+            return hex.ToString();
+        }
+
+        // False when the file cannot be written or Obsidian cannot be opened; the text is not left behind then.
+        public static bool HandToClaudian(string text, string messagePath, string vault, Func<string, bool> open, string token = null, long? now = null)
+        {
+            if (string.IsNullOrEmpty(messagePath)) return false;
+            token = token ?? NewToken();
+            var data = new Dictionary<string, object> { { "token", token }, { "text", text }, { "created", now ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } };
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(messagePath));
+                File.WriteAllText(messagePath, new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(data), new UTF8Encoding(false));
+            }
+            catch (IOException) { return false; }
+            catch (UnauthorizedAccessException) { return false; }
+            catch (SecurityException) { return false; }
+            if (open(ClaudianLink(token, vault))) return true;
+            try { File.Delete(messagePath); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            return false;
+        }
+
+        // Opens the link with the app Windows has for it (Obsidian for obsidian://).
+        public static bool OpenLink(string link)
+        {
+            try { using (System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(link) { UseShellExecute = true })) { } return true; }
+            catch (System.ComponentModel.Win32Exception) { return false; }
+            catch (InvalidOperationException) { return false; }
+            catch (FileNotFoundException) { return false; }
         }
     }
 }

@@ -141,6 +141,36 @@ internal static class UiTests
             typeof(NowDoingForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(form,new object[]{message,Keys.Escape});
             Assert(!form.Visible&&written.Count==2,"Esc closes the window without writing");
         }
+        var key=typeof(NowDoingForm).GetMethod("ProcessCmdKey",BindingFlags.Instance|BindingFlags.NonPublic);
+        var sent=new List<string>();
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Status=="Enter で日誌へ ／ Ctrl+Enter で日誌と Claudian へ ／ Esc でやめる","With Claudian on, the window says Ctrl+Enter also sends to Claudian");
+            SaveNowDoing(form,"now-doing-claudian-light.png");
+            form.Input="見積";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(!form.Visible&&written.Count==3&&written[2]=="見積"&&sent.Count==1&&sent[0]=="見積","Ctrl+Enter writes the line to the diary, then hands it to Claudian and closes");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();form.Input="日誌だけ";key.Invoke(form,new object[]{new Message(),Keys.Enter});
+            Assert(!form.Visible&&written.Count==4&&sent.Count==1,"Enter alone does not send to Claudian");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light,text=>{sent.Add(text);return false;}))
+        {
+            form.Show();Application.DoEvents();form.Input="送れない";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(form.Visible&&form.Input==""&&form.StatusIsFailure&&form.Status==NowDoingForm.ClaudianFailed&&written.Count==5&&sent.Count==2,"When Claudian cannot be reached the line stays written once, the box is emptied and the window says so");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.Busy;},f=>"busy",ThemePalette.Light,text=>{sent.Add(text);return true;}))
+        {
+            form.Show();Application.DoEvents();form.Input="書けない";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(form.Visible&&form.Input=="書けない"&&sent.Count==2,"Nothing goes to Claudian when the diary cannot be written");
+        }
+        using(var form=new NowDoingForm(opened,view,text=>{written.Add(text);return NowDoingFailure.None;},f=>"",ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Input="y";key.Invoke(form,new object[]{new Message(),Keys.Control|Keys.Enter});
+            Assert(!form.Visible&&written[written.Count-1]=="y"&&sent.Count==2,"Without the setting Ctrl+Enter only writes to the diary");
+        }
     }
     static int Main()
     {

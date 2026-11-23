@@ -16,6 +16,8 @@ namespace AIUsageManager
     {
         public const int MaxShown = 6;
         const string Hint = "Enter で日誌へ ／ Esc でやめる";
+        const string ClaudianHint = "Enter で日誌へ ／ Ctrl+Enter で日誌と Claudian へ ／ Esc でやめる";
+        public const string ClaudianFailed = "日誌には書きました。Claudian には送れませんでした（Obsidian を開けません）";
         // Layout in 96-DPI units; everything is multiplied by the screen's scale.
         const float Width96 = 520, Pad = 20, FieldTop = 98, FieldHeight = 42, StatusTop = 146, ListTop = 176, RowHeight = 26;
 
@@ -23,6 +25,7 @@ namespace AIUsageManager
         readonly NowDoingView view;
         readonly Func<string, NowDoingFailure> write;
         readonly Func<NowDoingFailure, string> describe;
+        readonly Func<string, bool> send;
         readonly ThemePalette palette;
         readonly TextBox input = new TextBox();
         readonly Button close = new Button();
@@ -34,9 +37,10 @@ namespace AIUsageManager
         bool statusIsFailure;
         public NowDoingFailure LastFailure { get; private set; }
 
-        public NowDoingForm(DateTime openedAt, NowDoingView view, Func<string, NowDoingFailure> write, Func<NowDoingFailure, string> describe, ThemePalette palette)
+        // `send` hands a written line to Claudian (Ctrl+Enter); null when now_doing_claudian is not on.
+        public NowDoingForm(DateTime openedAt, NowDoingView view, Func<string, NowDoingFailure> write, Func<NowDoingFailure, string> describe, ThemePalette palette, Func<string, bool> send = null)
         {
-            this.openedAt = openedAt; this.view = view; this.write = write; this.describe = describe; this.palette = palette;
+            this.openedAt = openedAt; this.view = view; this.write = write; this.describe = describe; this.palette = palette; this.send = send;
             Text = "いまやってること"; AccessibleName = Text; AutoScaleMode = AutoScaleMode.None;
             FormBorderStyle = FormBorderStyle.None; MaximizeBox = false; MinimizeBox = false; DoubleBuffered = true;
             ShowInTaskbar = true; TopMost = true; StartPosition = FormStartPosition.Manual; KeyPreview = true;
@@ -77,7 +81,7 @@ namespace AIUsageManager
 
         void ShowStatus(string failure)
         {
-            status = failure ?? Hint; statusIsFailure = failure != null;
+            status = failure ?? (send == null ? Hint : ClaudianHint); statusIsFailure = failure != null;
             Invalidate();
         }
 
@@ -198,19 +202,31 @@ namespace AIUsageManager
         {
             // While the IME is composing, Enter and Esc go to the IME (they arrive as ProcessKey) and never get here.
             if (keyData == Keys.Escape) { Close(); return true; }
-            if (keyData == Keys.Enter) { Submit(); return true; }
+            if (keyData == Keys.Enter) { Submit(false); return true; }
+            // Ctrl+Enter is a plain Enter when sending to Claudian is not on.
+            if (keyData == (Keys.Control | Keys.Enter)) { Submit(send != null); return true; }
             return base.ProcessCmdKey(ref msg, keyData);
         }
 
-        public void Submit()
+        public void Submit() { Submit(false); }
+
+        public void Submit(bool toClaudian)
         {
             string text = NowDoingNote.Clean(input.Text);
             if (text.Length == 0) { Close(); return; }
             NowDoingFailure failure = write(text);
             LastFailure = failure;
-            if (failure == NowDoingFailure.None) { Close(); return; }
             // The typed text stays, so another Enter can try again.
-            ShowStatus(describe(failure));
+            if (failure != NowDoingFailure.None) { ShowStatus(describe(failure)); return; }
+            // The line is only handed to Claudian after it is in the diary.
+            if (toClaudian && send != null && !send(text))
+            {
+                // It is in the diary already, so the box is emptied and another Enter cannot write it twice.
+                input.Text = "";
+                ShowStatus(ClaudianFailed);
+                return;
+            }
+            Close();
         }
 
         protected override void Dispose(bool disposing)
@@ -241,15 +257,20 @@ namespace AIUsageManager
                     openedAt = new DateTime(openedAt.Year, openedAt.Month, openedAt.Day, openedAt.Hour, openedAt.Minute, 0);
                     var themes = ThemeSettings.Default();
                     string settingsPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.ini");
-                    string backup = NowDoingNote.BackupPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+                    string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                    string backup = NowDoingNote.BackupPath(localAppData);
                     // The settings read here are used for both what is shown and where it is written, so the window
                     // never writes to a page other than the one it shows.
                     NowDoingSettings settings = NowDoingSettings.Load(settingsPath);
                     NowDoingView view = NowDoingNote.Look(settings, openedAt);
+                    string message = NowDoingNote.ClaudianMessagePath(localAppData);
+                    Func<string, bool> send = null;
+                    if (settings.Claudian && view.Path != null)
+                        send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(view.Path), NowDoingNote.OpenLink);
                     Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                     Application.Run(new NowDoingForm(openedAt, view,
                         text => NowDoingNote.Write(settings, openedAt, text, backup),
-                        failure => NowDoingNote.Message(failure, settings), ThemePalette.Resolve(themes.Load())));
+                        failure => NowDoingNote.Message(failure, settings), ThemePalette.Resolve(themes.Load()), send));
                 }
                 finally { mutex.ReleaseMutex(); }
             }
