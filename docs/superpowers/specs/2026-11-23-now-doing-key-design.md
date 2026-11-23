@@ -158,3 +158,5 @@
 - 窓の下に、その日の日中ログにある 📝 の記録を新しいものから6件まで出す。
 - 窓をタイトルバーのない形にし、トレイの窓と同じ色・角の丸みにした。空いているところをドラッグすると動かせる。
 - `now_doing_claudian=on` のとき、Ctrl+Enter で日誌に書いたあと、同じ文を Claudian のチャットに送る。窓は文と1回だけ使える合言葉を `%LOCALAPPDATA%\AIUsageManager\claudian-message.json` に置き、合言葉だけを入れた `obsidian://ai-usage-manager-claudian` のリンクを開く。AI Usage Manager の Obsidian プラグインが、合言葉が合うときだけ文を受け取り、Claudian の入力と同じ部分（`inputController.sendMessage`）で送る。Claudian に公開の受け口がないため、Claudian の更新で送れなくなることがある。通信は増えない（Claudian が送るのは Claudian 自身の通信）。
+- `now_doing_hotkey`（例: `Ctrl+Alt+N`）を書くと、トレイアプリがそのショートカットキーを RegisterHotKey で登録し、押されたら `--now-doing` で窓を開く（Stream Deck のキーと同じ形）。トレイアプリは、窓の処理が手前に出られるように AllowSetForegroundWindow で許す。
+- トレイの「使用量」の窓を、ボタン・サービスの行・対応待ちの項目以外のところをドラッグして動かせるようにした（次に開くときは、いままでどおりトレイの近くに出る）。

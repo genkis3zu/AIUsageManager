@@ -76,7 +76,8 @@ namespace AIUsageManager
                 bool refresh=args.Length==1&&args[0]=="--refresh";
                 if(!created){if(refresh)refreshSignal.Set();else if(ShowsRunningApp(args))signal.Set();return;}
                 AppLocation.Save(AppLocation.DefaultPath(),Application.ExecutablePath);
-                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal));}
+                string hotkey=NowDoingSettings.Load(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"settings.ini")).Hotkey;
+                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal,nowDoingHotkey:hotkey));}
                 finally {mutex.ReleaseMutex();}
             }
         }

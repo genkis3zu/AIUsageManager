@@ -84,6 +84,31 @@ internal static class UiTests
         }
         themes.HideDropDown();menu.Close();
     }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd,int message,IntPtr wParam,IntPtr lParam);
+    static void CheckHotkeyAndDrag()
+    {
+        var key=NowDoingHotkey.Parse("Ctrl+Alt+Shift+F24");int presses=0;
+        using(var first=new HotkeyWindow(key,()=>presses++))
+        {
+            Assert(first.Registered,"The shortcut key is registered with Windows");
+            using(var second=new HotkeyWindow(key,()=>{}))Assert(!second.Registered,"A shortcut key that is already taken is reported as not registered");
+            SendMessage(first.Handle,0x0312,(IntPtr)1,IntPtr.Zero);
+            Assert(presses==1,"Pressing the shortcut key opens the いまやってること window");
+            SendMessage(first.Handle,0x0312,(IntPtr)2,IntPtr.Zero);
+            Assert(presses==1,"Another shortcut key message does nothing");
+        }
+        using(var again=new HotkeyWindow(key,()=>{}))Assert(again.Registered,"Closing gives the shortcut key back to Windows");
+        using(var popup=new PopupForm())
+        {
+            popup.SetWaiting(new WaitingList{Items=new[]{new WaitingItem{Key="Claude/q",Service="Claude",Place="P",App="claude",Reason=WaitReason.Question,Since=DateTimeOffset.Now}}},DateTimeOffset.Now);
+            popup.OpenAt(new Point(400,700));popup.Refresh();Application.DoEvents();
+            float s=Field<float>(popup,"scale");
+            Func<float,float,int> hit=(x,y)=>{Point p=popup.PointToScreen(new Point((int)(x*s),(int)(y*s)));return SendMessage(popup.Handle,0x84,IntPtr.Zero,new IntPtr(((p.Y&0xffff)<<16)|(p.X&0xffff))).ToInt32();};
+            Assert(hit(60,30)==2&&!popup.MaximizeBox,"The 使用量 window can be dragged by its heading, and a double click there does not maximize it");
+            Assert(hit(200,100)==1,"A waiting item in the 使用量 window stays clickable");
+            popup.Hide();
+        }
+    }
     static void SaveNowDoing(Form form,string name)
     {
         string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"screenshots");Directory.CreateDirectory(output);
@@ -185,6 +210,7 @@ internal static class UiTests
             string fixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(fixture);
             string path=Path.Combine(fixture,"settings.ini");var settings=new ThemeSettings(path);CheckSettings(settings,path);
             CheckNowDoingWindow();
+            CheckHotkeyAndDrag();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var snapshots=new SnapshotServer("AIUsageManager.UiTests."+Guid.NewGuid().ToString("N")))

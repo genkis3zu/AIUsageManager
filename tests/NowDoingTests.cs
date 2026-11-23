@@ -205,6 +205,21 @@ internal static partial class Tests
             Assert(!NowDoingNote.HandToClaudian("x", null, null, link => { links.Add(link); return true; }) && links.Count == 1);
             Assert(NowDoingNote.ClaudianMessagePath(@"C:\Users\a\AppData\Local") == @"C:\Users\a\AppData\Local\AIUsageManager\claudian-message.json" && NowDoingNote.ClaudianMessagePath("") == null);
         });
+        Check("The shortcut key is read from now_doing_hotkey and needs Ctrl, Alt or Win with one key", () => {
+            Assert(NowDoingSettings.Parse("now_doing_hotkey=Ctrl+Alt+N\n").Hotkey == "Ctrl+Alt+N" && NowDoingSettings.Parse("").Hotkey == null);
+            NowDoingHotkey k = NowDoingHotkey.Parse(" ctrl + alt + n ");
+            Assert(k != null && k.Modifiers == (NowDoingHotkey.Control | NowDoingHotkey.Alt) && k.Key == System.Windows.Forms.Keys.N && k.Text == "ctrl + alt + n");
+            Assert(NowDoingHotkey.Parse("Win+Shift+F12").Key == System.Windows.Forms.Keys.F12 && NowDoingHotkey.Parse("Win+Shift+F12").Modifiers == (NowDoingHotkey.Win | NowDoingHotkey.Shift));
+            Assert(NowDoingHotkey.Parse("Alt+1").Key == System.Windows.Forms.Keys.D1 && NowDoingHotkey.Parse("Ctrl+Space").Key == System.Windows.Forms.Keys.Space);
+            foreach (string bad in new[] { null, "", "N", "Shift+N", "Ctrl+Alt", "Ctrl+N+M", "Ctrl+F25", "Ctrl+F0", "Ctrl++", "Ctrl+Enter", "Ctrl+あ", "Hyper+N" })
+                Assert(NowDoingHotkey.Parse(bad) == null);
+        });
+        Check("The tray says when the shortcut key is written wrongly or taken by another app", () => {
+            Assert(NowDoingHotkey.Problem(null, null, false) == null && NowDoingHotkey.Problem("  ", null, false) == null);
+            Assert(NowDoingHotkey.Problem("Shift+N", null, false) == "settings.ini の now_doing_hotkey「Shift+N」の書き方が違います（例: Ctrl+Alt+N）");
+            Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), false) == "ショートカット「Ctrl+Alt+N」は、ほかのアプリが使っているため使えません");
+            Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), true) == null);
+        });
         try { Directory.Delete(dir, true); } catch (IOException) { }
     }
 }

@@ -18,6 +18,8 @@ namespace AIUsageManager
         public string Before;
         // now_doing_claudian=on: Ctrl+Enter also hands the line to Claudian through the Obsidian plugin.
         public bool Claudian;
+        // now_doing_hotkey=Ctrl+Alt+N: the tray app opens the window with this shortcut key.
+        public string Hotkey;
 
         public static NowDoingSettings Parse(string ini)
         {
@@ -33,6 +35,7 @@ namespace AIUsageManager
                 else if (key == "now_doing_heading") settings.Heading = value;
                 else if (key == "now_doing_before") settings.Before = value;
                 else if (key == "now_doing_claudian") settings.Claudian = value == "on";
+                else if (key == "now_doing_hotkey") settings.Hotkey = value;
             }
             return settings;
         }
