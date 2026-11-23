@@ -1,7 +1,15 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Web.Script.Serialization;
 using AIUsageManager;
 
 internal static partial class Tests
@@ -24,8 +32,113 @@ internal static partial class Tests
         finally { LocalFree(list); }
     }
 
+    // This test program run as a script by the script tests: `--child <mode> …`.
+    static int Child(string[] args)
+    {
+        string mode = args.Length > 1 ? args[1] : "";
+        using (Stream output = Console.OpenStandardOutput())
+        using (Stream error = Console.OpenStandardError())
+        {
+            Action<Stream, string> write = (stream, text) => { byte[] b = new UTF8Encoding(false).GetBytes(text); stream.Write(b, 0, b.Length); stream.Flush(); };
+            switch (mode)
+            {
+                case "args": write(output, new JavaScriptSerializer().Serialize(args.Skip(2).ToArray())); return 0;
+                case "cwd": write(output, Environment.CurrentDirectory); return 0;
+                case "crlf": write(output, "一行目\r\n二行目\r\n\r\n"); return 0;
+                case "badutf8": output.WriteByte(0xFF); write(output, "ok"); return 0;
+                case "big": write(output, new string('x', int.Parse(args[2], CultureInfo.InvariantCulture))); return 0;
+                case "lines": write(output, string.Concat(Enumerable.Repeat("l\n", int.Parse(args[2], CultureInfo.InvariantCulture)))); return 0;
+                case "fail": write(error, "\n  理由の1行目\n2行目"); return 3;
+                case "exit": return int.Parse(args[2], CultureInfo.InvariantCulture);
+                case "sleep": Thread.Sleep(60000); return 0;
+                case "spawn-sleep":
+                    using (Process child = Process.Start(new ProcessStartInfo(Assembly.GetExecutingAssembly().Location, "--child sleep") { UseShellExecute = false, CreateNoWindow = true }))
+                        File.WriteAllText(args[2], child.Id.ToString(CultureInfo.InvariantCulture));
+                    Thread.Sleep(60000);
+                    return 0;
+                default: return 99;
+            }
+        }
+    }
+
+    static bool Ended(int pid, int withinMs)
+    {
+        var clock = Stopwatch.StartNew();
+        while (clock.ElapsedMilliseconds < withinMs)
+        {
+            try { using (Process p = Process.GetProcessById(pid)) if (p.HasExited) return true; }
+            catch (ArgumentException) { return true; }
+            Thread.Sleep(50);
+        }
+        return false;
+    }
+
+    static void RunNowDoingScriptTests()
+    {
+        string self = Assembly.GetExecutingAssembly().Location;
+        Func<string, string> child = mode => NowDoingCommand.Quote(self) + " --child " + mode;
+        string temp = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "now-doing-script-test");
+        Directory.CreateDirectory(temp);
+        Func<string, IList<string>, NowDoingScriptLimits, NowDoingScriptResult> run = (command, arguments, limits) =>
+            NowDoingScript.RunAsync(command, arguments, temp, limits, CancellationToken.None).Result;
+        Check("Arguments reach the script as they were given", () => {
+            var given = new[] { "--note", @"C:\Notes\2026年_日誌\2026-11-24 - 日誌.md", "--text", "a \"b\" \\ & | %PATH%\n二行目" };
+            NowDoingScriptResult r = run(child("args"), given, NowDoingScriptLimits.After);
+            Assert(r.Ok && new JavaScriptSerializer().Deserialize<string[]>(r.Output).SequenceEqual(given));
+        });
+        Check("The script runs in the working folder it is given", () => {
+            NowDoingScriptResult r = run(child("cwd"), new string[0], NowDoingScriptLimits.After);
+            Assert(r.Ok && string.Equals(r.Output.TrimEnd('\\'), temp.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase));
+        });
+        Check("Output is read as UTF-8 with LF line breaks and no line break at the end", () => {
+            NowDoingScriptResult r = run(child("crlf"), null, NowDoingScriptLimits.After);
+            Assert(r.Ok && r.Output == "一行目\n二行目" && r.FirstLine == "一行目");
+            r = run(child("badutf8"), null, NowDoingScriptLimits.After);
+            Assert(r.Ok && r.Output == "\uFFFDok");
+        });
+        Check("Too much output fails", () => {
+            Assert(run(child("big 4096"), null, NowDoingScriptLimits.After).Ok);
+            NowDoingScriptResult r = run(child("big 4097"), null, NowDoingScriptLimits.After);
+            Assert(!r.Ok && r.Reason == "出力が多すぎます");
+            Assert(run(child("lines 20"), null, NowDoingScriptLimits.After).Ok && !run(child("lines 21"), null, NowDoingScriptLimits.List).Ok);
+            Assert(run(child("big 32768"), null, NowDoingScriptLimits.Copy).Ok && !run(child("big 32769"), null, NowDoingScriptLimits.Copy).Ok);
+            Assert(run(child("lines 100"), null, NowDoingScriptLimits.Copy).Ok);
+        });
+        Check("A script that runs too long is ended with its children", () => {
+            string file = Path.Combine(temp, "timeout.pid");
+            File.Delete(file);
+            NowDoingScriptResult r = run(child("spawn-sleep " + NowDoingCommand.Quote(file)), null, new NowDoingScriptLimits { TimeoutMs = 1000, MaxBytes = 4096, MaxLines = 20 });
+            Assert(!r.Ok && r.Reason == "時間切れ（1秒）");
+            Assert(Ended(int.Parse(File.ReadAllText(file), CultureInfo.InvariantCulture), 2000));
+        });
+        Check("Failures say why", () => {
+            Assert(run(child("fail"), null, NowDoingScriptLimits.After).Reason == "理由の1行目");
+            Assert(run(child("exit 4"), null, NowDoingScriptLimits.After).Reason == "終了コード 4");
+            NowDoingScriptResult r = run("no-such-program-x --a", null, NowDoingScriptLimits.After);
+            Assert(!r.Ok && r.Reason == "起動できません（no-such-program-x）");
+            Assert(run("\"a", null, NowDoingScriptLimits.After).Reason == "命令の書き方が違います");
+            r = NowDoingScript.RunAsync(child("cwd"), null, Path.Combine(temp, "none"), NowDoingScriptLimits.After, CancellationToken.None).Result;
+            Assert(!r.Ok && r.Reason == "作業フォルダーがありません");
+        });
+        Check("Cancelling ends the script and its children", () => {
+            string file = Path.Combine(temp, "cancel.pid");
+            File.Delete(file);
+            using (var cancel = new CancellationTokenSource())
+            {
+                Task<NowDoingScriptResult> task = NowDoingScript.RunAsync(child("spawn-sleep " + NowDoingCommand.Quote(file)), null, temp, new NowDoingScriptLimits { TimeoutMs = 60000, MaxBytes = 4096, MaxLines = 20 }, cancel.Token);
+                var clock = Stopwatch.StartNew();
+                while (!File.Exists(file) && clock.ElapsedMilliseconds < 10000) Thread.Sleep(50);
+                Thread.Sleep(100);
+                cancel.Cancel();
+                Assert(task.Wait(5000) && !task.Result.Ok && task.Result.Reason == "中止しました");
+                Assert(Ended(int.Parse(File.ReadAllText(file), CultureInfo.InvariantCulture), 2000));
+            }
+        });
+    }
+
     static void RunNowDoingActionTests()
     {
+        RunNowDoingScriptTests();
         Check("Buttons are read in their three forms", () => {
             NowDoingButton b = NowDoingButton.Parse(1, "🚶 散歩|record:🚶 散歩 ✅");
             Assert(b.Number == 1 && b.Kind == NowDoingButtonKind.Record && b.Label == "🚶 散歩" && b.Value == "🚶 散歩 ✅" && b.App == null);

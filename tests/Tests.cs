@@ -22,8 +22,10 @@ internal static partial class Tests
         return "{'kind':'" + kind + "','group':'weekly','percent':" + percent + ",'severity':'normal','resets_at':'2026-11-22T23:00:00.123+00:00'," +
             "'scope':" + (model == null ? "null" : "{'model':{'id':null,'display_name':'" + model + "'},'surface':null}") + ",'is_active':false}";
     }
-    public static int Main()
+    public static int Main(string[] args)
     {
+        // The script tests start this program again as a small script (see NowDoingActionTests).
+        if (args.Length > 0 && args[0] == "--child") return Child(args);
         Check("Claude explicit zero is acquired", () => {
             var r = UsageParser.Claude("{\"five_hour\":{\"utilization\":0},\"seven_day\":{\"utilization\":98}}", "max", T, "API");
             Assert(r.Windows[0].Percent == 0 && r.Windows[1].Percent == 98 && r.RecordedAt == T);
