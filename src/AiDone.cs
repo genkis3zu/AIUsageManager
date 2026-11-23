@@ -59,9 +59,16 @@ namespace AIUsageManager
             List<WaitingItem> done = batch.OrderBy(i => i.Since).ToList();
             batch.Clear();
             DateTime first = done[0].Since.LocalDateTime;
-            string text = done.Count == 1 ? One(done[0]) : "完了: " + string.Join("・", done.Select(Named));
+            // Sessions or threads of the same app with the same name (several in one folder) are named once, with the
+            // count, in the order their first one finished.
+            var named = done.GroupBy(i => i.Service + "\n" + WaitingNames.Clean(i.Place))
+                .Select(g => new KeyValuePair<WaitingItem, int>(g.First(), g.Count())).ToList();
+            string text = named.Count == 1 ? One(named[0].Key) + Count(named[0].Value)
+                : "完了: " + string.Join("・", named.Select(n => Named(n.Key) + Count(n.Value)));
             return new AiDoneEntry { Time = new DateTime(first.Year, first.Month, first.Day, first.Hour, first.Minute, 0), Text = text };
         }
+
+        static string Count(int count) { return count > 1 ? "（" + count + "件）" : ""; }
 
         static string One(WaitingItem item)
         {

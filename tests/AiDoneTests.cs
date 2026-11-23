@@ -36,6 +36,19 @@ internal static partial class Tests
             log.Observe(new[] { Finished("Claude/d", "Claude", "", null, At(12, 0)), Finished("Codex/e", "Codex", "E", null, At(12, 1)) }, At(12, 1, 1));
             Assert(log.Due(At(12, 4, 0)).Text == "完了: Claude・Codex「E」");
         });
+        Check("Finishes with the same app and name are written once with the count", () => {
+            var log = new AiDoneLog(null);
+            log.Observe(new[] { Finished("Codex/t1", "Codex", "Q", @"C:\q", At(10, 0)), Finished("Codex/t2", "Codex", "Q", @"C:\q", At(10, 1)) }, At(10, 1, 5));
+            AiDoneEntry entry = log.Due(At(10, 3, 5));
+            Assert(entry.Text == "Codex 完了: Q（2件）" && entry.Time == new DateTime(2026, 11, 24, 10, 0, 0));
+            log.Observe(new[] { Finished("Codex/t3", "Codex", "B", null, At(11, 0)), Finished("Claude/a", "Claude", "A", null, At(11, 0, 30)), Finished("Codex/t4", "Codex", "B", null, At(11, 1)) }, At(11, 1, 5));
+            Assert(log.Due(At(11, 4, 0)).Text == "完了: Codex「B」（2件）・Claude「A」");
+            log.Observe(new[] { Finished("Claude/x", "Claude", "", null, At(12, 0)), Finished("Claude/y", "Claude", "", null, At(12, 1)), Finished("Codex/z", "Codex", "", null, At(12, 1)) }, At(12, 1, 5));
+            Assert(log.Due(At(12, 4, 0)).Text == "完了: Claude（2件）・Codex");
+            // The same name in another app is another entry.
+            log.Observe(new[] { Finished("Claude/p", "Claude", "P", null, At(13, 0)), Finished("Codex/p", "Codex", "P", null, At(13, 1)) }, At(13, 1, 5));
+            Assert(log.Due(At(13, 4, 0)).Text == "完了: Claude「P」・Codex「P」");
+        });
         Check("The same session is written at most once in 30 minutes", () => {
             var log = new AiDoneLog(new string[0]);
             log.Observe(new[] { Finished("Claude/a", "Claude", "A", null, At(10, 0)) }, At(10, 0, 5));
