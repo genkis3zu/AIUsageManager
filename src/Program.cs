@@ -76,8 +76,9 @@ namespace AIUsageManager
                 bool refresh=args.Length==1&&args[0]=="--refresh";
                 if(!created){if(refresh)refreshSignal.Set();else if(ShowsRunningApp(args))signal.Set();return;}
                 AppLocation.Save(AppLocation.DefaultPath(),Application.ExecutablePath);
-                string hotkey=NowDoingSettings.Load(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"settings.ini")).Hotkey;
-                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal,nowDoingHotkey:hotkey));}
+                // The いまやってること settings the tray app uses (shortcut key, AI done lines) are read once at start.
+                NowDoingSettings nowDoing=NowDoingSettings.Load(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"settings.ini"));
+                try {using(var snapshots=new SnapshotServer(SnapshotServer.CurrentName()))Application.Run(new TrayContext(args.Contains("--show"),signal,null,ThemeSettings.Default(),new LoginLauncher(),new[]{claudeLogin,codexLogin,grokLogin},null,snapshots,refreshSignal,nowDoingHotkey:nowDoing.Hotkey,nowDoing:nowDoing));}
                 finally {mutex.ReleaseMutex();}
             }
         }

@@ -67,8 +67,11 @@ namespace AIUsageManager
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
             : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
-        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null, string nowDoingHotkey=null, Action<string> startupWarning=null)
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null, string nowDoingHotkey=null, Action<string> startupWarning=null, NowDoingSettings nowDoing=null)
         {
+            // now_doing_ai_done=on: finished AI work goes to the 日中ログ of the diary in now_doing_note.
+            this.nowDoing=nowDoing;
+            if(nowDoing!=null&&nowDoing.AiDone)aiDone=new AiDoneLog(nowDoing.AiDoneExclude);
             startup=StartAtSignIn.StoreFor(startupStore,source!=null);
             this.waitingSource=waitingSource??(source==null?new LocalWaitingSource(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)):null);
             statusPages=statusSource??(source==null?(Func<CancellationToken,Task<ProviderStatus[]>>)(token=>StatusPages.FetchAsync(http,token)):null);
@@ -214,9 +217,34 @@ namespace AIUsageManager
                 if(changed||popup.Visible)popup.SetWaiting(list,now);
                 if(changed)PublishSnapshot();
                 foreach(string text in waitingReminders.Due(list.Items,now,waitingMode))waitingNotify(text);
+                if(aiDone!=null){aiDone.Observe(list.Items,now);await WriteAiDone(now);}
             }
             catch(Exception) { }
             finally { readingWaiting=false; }
+        }
+        readonly NowDoingSettings nowDoing;
+        readonly AiDoneLog aiDone;
+        AiDoneEntry doneEntry;
+        DateTimeOffset doneDue,doneNextTry;
+        // Writes the line for finished AI work when it is due and the diary has been quiet for 10 seconds. A missing or
+        // unwritable diary is not reported: the line is dropped. The after script is never run for these lines.
+        async Task WriteAiDone(DateTimeOffset now)
+        {
+            if(doneEntry==null) {doneEntry=aiDone.Due(now);if(doneEntry==null)return;doneDue=now;doneNextTry=now;}
+            if(now<doneNextTry)return;
+            AiDoneEntry entry=doneEntry;
+            string path=string.IsNullOrEmpty(nowDoing.Note)?null:NowDoingNote.NotePath(nowDoing.Note,entry.Time);
+            DateTime changed;
+            try { if(path==null||!System.IO.File.Exists(path)){doneEntry=null;return;} changed=System.IO.File.GetLastWriteTimeUtc(path); }
+            catch(System.IO.IOException){doneEntry=null;return;}
+            catch(UnauthorizedAccessException){doneEntry=null;return;}
+            catch(System.Security.SecurityException){doneEntry=null;return;}
+            AiDoneWait decision=AiDoneLog.Decide(changed,now.UtcDateTime,doneDue.UtcDateTime);
+            if(decision==AiDoneWait.Wait){doneNextTry=now.AddSeconds(10);return;}
+            doneEntry=null;
+            if(decision==AiDoneWait.GiveUp)return;
+            string backup=NowDoingNote.BackupPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ai-done-last.md");
+            await Task.Run(()=>NowDoingNote.Write(nowDoing,entry.Time,entry.Text,backup,null,AiDoneLog.Mark));
         }
         void ApplyTheme()
         {

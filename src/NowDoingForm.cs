@@ -39,14 +39,21 @@ namespace AIUsageManager
     internal sealed class NowDoingTextBox : TextBox
     {
         const int WM_PASTE = 0x0302;
+        // Where pasted text comes from: the clipboard's text, or null when it holds no text.
+        public Func<string> PastedText = ClipboardText;
+
+        static string ClipboardText()
+        {
+            try { return Clipboard.ContainsText() ? Clipboard.GetText() : null; }
+            catch (ExternalException) { return null; }
+        }
+
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == WM_PASTE)
             {
                 if (ReadOnly) return;
-                string text = null;
-                try { if (Clipboard.ContainsText()) text = Clipboard.GetText(); }
-                catch (ExternalException) { }
+                string text = PastedText();
                 if (!string.IsNullOrEmpty(text)) Paste(text.Replace("\r\n", "\n").Replace('\r', '\n').Replace("\n", "\r\n"));
                 return;
             }

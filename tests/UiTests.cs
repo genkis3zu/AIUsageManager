@@ -253,8 +253,12 @@ internal static class UiTests
             SaveNowDoing(form,"now-doing-multiline-light.png");
             form.Input=string.Join("\r\n",Enumerable.Range(1,10));Application.DoEvents();
             Assert(form.InputLines==6&&box.ScrollBars==ScrollBars.Vertical,"The box grows to six lines at most and scrolls after that");
-            form.Input="";Clipboard.SetText("一\n二\r\n三");SendMessage(box.Handle,0x302,IntPtr.Zero,IntPtr.Zero);
+            // The test's own text stands in for the clipboard, which other apps on this PC use too.
+            var paste=(NowDoingTextBox)box;
+            form.Input="";paste.PastedText=()=>"一\n二\r\n三";SendMessage(box.Handle,0x302,IntPtr.Zero,IntPtr.Zero);
             Assert(form.Input=="一\r\n二\r\n三","Pasted text keeps its line breaks, also when they are LF only");
+            form.Input="x";paste.PastedText=()=>null;SendMessage(box.Handle,0x302,IntPtr.Zero,IntPtr.Zero);
+            Assert(form.Input=="x","Pasting something that is not text changes nothing");
             form.Press(Keys.Control|Keys.A);
             Assert(box.SelectionLength==box.TextLength,"Ctrl+A selects the whole box");
             form.Input="a\r\nb";form.Press(Keys.Enter);

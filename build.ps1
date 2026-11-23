@@ -7,7 +7,7 @@ $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (!(Test-Path -LiteralPath $csc)) { $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
 $refs = @('/r:System.dll','/r:System.Core.dll','/r:System.Security.dll','/r:System.Web.Extensions.dll','/r:System.Net.Http.dll','/r:System.Drawing.dll','/r:System.Windows.Forms.dll')
 $core = @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | Where-Object { $_.Name -notin @('Program.cs','PopupForm.cs','TrayContext.cs') } | ForEach-Object { $_.FullName })
-& $csc /nologo /utf8output /warn:4 /warnaserror /optimize+ /target:exe "/out:$out\Tests.exe" @refs @core "$root\tests\Tests.cs" "$root\tests\ProviderTests.cs" "$root\tests\GrokWebTests.cs" "$root\tests\WidgetTests.cs" "$root\tests\AlertTests.cs" "$root\tests\ForecastTests.cs" "$root\tests\SnapshotTests.cs" "$root\tests\StatusTests.cs" "$root\tests\WaitingTests.cs" "$root\tests\StartupTests.cs" "$root\tests\NowDoingTests.cs" "$root\tests\NowDoingActionTests.cs"
+& $csc /nologo /utf8output /warn:4 /warnaserror /optimize+ /target:exe "/out:$out\Tests.exe" @refs @core "$root\tests\Tests.cs" "$root\tests\ProviderTests.cs" "$root\tests\GrokWebTests.cs" "$root\tests\WidgetTests.cs" "$root\tests\AlertTests.cs" "$root\tests\ForecastTests.cs" "$root\tests\SnapshotTests.cs" "$root\tests\StatusTests.cs" "$root\tests\WaitingTests.cs" "$root\tests\StartupTests.cs" "$root\tests\NowDoingTests.cs" "$root\tests\NowDoingActionTests.cs" "$root\tests\AiDoneTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Test compile failed' }
 & "$out\Tests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }

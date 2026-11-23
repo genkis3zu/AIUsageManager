@@ -302,6 +302,8 @@ namespace AIUsageManager
     public sealed class WaitingItem
     {
         public string Key, Service, Place, App;
+        // The session's working folder, for leaving out work in some folders from the 日中ログ; not shared with other apps.
+        public string Cwd;
         public WaitReason Reason;
         public DateTimeOffset Since;
     }
@@ -328,14 +330,14 @@ namespace AIUsageManager
                 string key = "Claude/" + session.SessionId, state = session.Status == "waiting" ? "waiting" : session.Status == "busy" ? "busy" : session.Status == "idle" ? "idle" : "other";
                 present.Add(key);
                 var reason = state == "waiting" ? (session.WaitingFor == "input needed" ? WaitReason.Question : WaitReason.Confirm) : WaitReason.Finished;
-                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), WaitingNames.ClaudeApp(session.Entrypoint, session.Parents), reason, session.StatusUpdatedAt, now);
+                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), session.Cwd, WaitingNames.ClaudeApp(session.Entrypoint, session.Parents), reason, session.StatusUpdatedAt, now);
             }
             foreach (var thread in codex ?? new CodexThread[0])
             {
                 if (thread == null) continue;
                 string key = "Codex/" + (thread.Id ?? thread.Cwd ?? ""), state = thread.State == CodexState.Question ? "waiting" : thread.State == CodexState.Finished ? "idle" : thread.State == CodexState.Working ? "busy" : "other";
                 present.Add(key);
-                Add(items, key, state, "busy", "Codex", WaitingNames.Place(null, thread.Cwd), CodexSessions.App(thread), WaitReason.Question, thread.Since, now);
+                Add(items, key, state, "busy", "Codex", WaitingNames.Place(null, thread.Cwd), thread.Cwd, CodexSessions.App(thread), WaitReason.Question, thread.Since, now);
             }
             foreach (var gone in lastState.Keys.Where(k => !present.Contains(k)).ToArray()) { lastState.Remove(gone); finished.Remove(gone); firstSeen.Remove(gone); }
             var unreadable = new List<WaitingUnreadable>();
@@ -345,7 +347,7 @@ namespace AIUsageManager
             var done = items.Where(i => i.Reason == WaitReason.Finished).OrderByDescending(i => i.Since);
             return new WaitingList { Items = waits.Concat(done).ToArray(), Unreadable = unreadable.ToArray() };
         }
-        void Add(List<WaitingItem> items, string key, string state, string working, string service, string place, string app, WaitReason waitReason, DateTimeOffset? at, DateTimeOffset now)
+        void Add(List<WaitingItem> items, string key, string state, string working, string service, string place, string cwd, string app, WaitReason waitReason, DateTimeOffset? at, DateTimeOffset now)
         {
             string previous; lastState.TryGetValue(key, out previous); lastState[key] = state;
             if (state != "waiting") firstSeen.Remove(key);
@@ -354,7 +356,7 @@ namespace AIUsageManager
                 finished.Remove(key);
                 DateTimeOffset seen;
                 if (!firstSeen.TryGetValue(key, out seen)) { seen = now; firstSeen[key] = now; }
-                items.Add(new WaitingItem { Key = key, Service = service, Place = place, App = app, Reason = waitReason, Since = Clamp(at ?? seen, now) });
+                items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, Reason = waitReason, Since = Clamp(at ?? seen, now) });
                 return;
             }
             if (state != "idle") { finished.Remove(key); return; }
@@ -364,7 +366,7 @@ namespace AIUsageManager
                 if (previous != working && previous != "waiting") return;
                 since = Clamp(at ?? now, now); finished[key] = since;
             }
-            if (now - since <= FinishedFor) items.Add(new WaitingItem { Key = key, Service = service, Place = place, App = app, Reason = WaitReason.Finished, Since = since });
+            if (now - since <= FinishedFor) items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, Reason = WaitReason.Finished, Since = since });
         }
         static DateTimeOffset Clamp(DateTimeOffset at, DateTimeOffset now) { return at > now ? now : at; }
     }
