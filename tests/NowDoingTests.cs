@@ -250,16 +250,17 @@ internal static partial class Tests
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), false) == "ショートカット「Ctrl+Alt+N」は、ほかのアプリが使っているため使えません");
             Assert(NowDoingHotkey.Problem("Ctrl+Alt+N", NowDoingHotkey.Parse("Ctrl+Alt+N"), true) == null);
         });
-        Check("Double-press settings are read, and Alt or Win double presses are not", () => {
+        Check("Double-press settings for Ctrl, Shift and Alt are read, and Win double presses are not", () => {
             var cases = new System.Collections.Generic.Dictionary<string, DoubleTapKey> {
                 { "DoubleCtrl", DoubleTapKey.Ctrl }, { "DoubleLeftCtrl", DoubleTapKey.LeftCtrl }, { "DoubleRightCtrl", DoubleTapKey.RightCtrl },
-                { "DoubleShift", DoubleTapKey.Shift }, { "doubleshift", DoubleTapKey.Shift }, { "DoubleLeftShift", DoubleTapKey.LeftShift }, { "DoubleRightShift", DoubleTapKey.RightShift } };
+                { "DoubleShift", DoubleTapKey.Shift }, { "doubleshift", DoubleTapKey.Shift }, { "DoubleLeftShift", DoubleTapKey.LeftShift }, { "DoubleRightShift", DoubleTapKey.RightShift },
+                { "DoubleAlt", DoubleTapKey.Alt }, { "DoubleLeftAlt", DoubleTapKey.LeftAlt }, { "DoubleRightAlt", DoubleTapKey.RightAlt } };
             foreach (var c in cases)
             {
                 NowDoingHotkey k = NowDoingHotkey.Parse(" " + c.Key + " ");
                 Assert(k != null && k.Double == c.Value && k.Modifiers == 0 && k.Key == System.Windows.Forms.Keys.None && k.Text == c.Key);
             }
-            foreach (string bad in new[] { "DoubleAlt", "DoubleWin", "Double", "DoubleCtrl+N", "Ctrl+DoubleCtrl" })
+            foreach (string bad in new[] { "DoubleWin", "Double", "DoubleCtrl+N", "Ctrl+DoubleCtrl", "DoubleAltGr" })
                 Assert(NowDoingHotkey.Parse(bad) == null && NowDoingHotkey.Problem(bad, null, false).Contains("DoubleCtrl"));
             Assert(NowDoingHotkey.Problem("DoubleCtrl", NowDoingHotkey.Parse("DoubleCtrl"), false) == "「DoubleCtrl」を使えませんでした（キーボードの入力を受け取れません）");
             Assert(NowDoingHotkey.Problem("DoubleCtrl", NowDoingHotkey.Parse("DoubleCtrl"), true) == null);

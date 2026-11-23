@@ -190,7 +190,8 @@ internal static partial class Tests
         int found = 0;
         foreach (string e in events.Split(' '))
         {
-            TapKey k = e[0] == 'L' ? TapKey.LeftCtrl : e[0] == 'R' ? TapKey.RightCtrl : e[0] == 'S' ? TapKey.LeftShift : e[0] == 'T' ? TapKey.RightShift : TapKey.Other;
+            TapKey k = e[0] == 'L' ? TapKey.LeftCtrl : e[0] == 'R' ? TapKey.RightCtrl : e[0] == 'S' ? TapKey.LeftShift : e[0] == 'T' ? TapKey.RightShift
+                : e[0] == 'A' ? TapKey.LeftAlt : e[0] == 'B' ? TapKey.RightAlt : TapKey.Other;
             if (detector.Observe(k, e[1] == '+', uint.Parse(e.Substring(2), CultureInfo.InvariantCulture))) found++;
         }
         return found;
@@ -204,6 +205,12 @@ internal static partial class Tests
             Assert(Taps(DoubleTapKey.Shift, "S+0 S-100 S+500 S-600") == 1 && Taps(DoubleTapKey.LeftShift, "S+0 S-100 S+500 S-600") == 1);
             Assert(Taps(DoubleTapKey.RightShift, "T+0 T-100 T+500 T-600") == 1 && Taps(DoubleTapKey.Shift, "T+0 T-100 T+500 T-600") == 1);
             Assert(Taps(DoubleTapKey.Ctrl, "S+0 S-100 S+500 S-600") == 0 && Taps(DoubleTapKey.Shift, "L+0 L-100 L+500 L-600") == 0 && Taps(DoubleTapKey.None, "L+0 L-100 L+500 L-600") == 0);
+        });
+        Check("Alt pressed twice is found for the Alt settings, telling left and right apart only when asked", () => {
+            Assert(Taps(DoubleTapKey.RightAlt, "B+0 B-100 B+500 B-600") == 1 && Taps(DoubleTapKey.RightAlt, "A+0 A-100 A+500 A-600") == 0);
+            Assert(Taps(DoubleTapKey.LeftAlt, "A+0 A-100 A+500 A-600") == 1 && Taps(DoubleTapKey.Alt, "A+0 A-100 B+200 B-300") == 1);
+            // Alt+Tab and Ctrl or Shift with Alt are not a double press.
+            Assert(Taps(DoubleTapKey.RightAlt, "B+0 X+50 B-100 B+200 B-300") == 0 && Taps(DoubleTapKey.Ctrl, "L+0 L-100 B+150 L+200 L-300") == 0);
         });
         Check("Presses up to 300 ms and a gap up to 400 ms count", () => {
             Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-300 L+700 L-1000") == 1);
@@ -230,10 +237,11 @@ internal static partial class Tests
             Assert(Taps(DoubleTapKey.Ctrl, "L+0 L-50 L+100 L-150 L+200 L-250") == 1);
             Assert(Taps(DoubleTapKey.Ctrl, "L+4294967200 L-4294967250 L+4294967290 L-44") == 1);
         });
-        Check("Only the left and right Ctrl and Shift keys are told apart", () => {
+        Check("Only the left and right Ctrl, Shift and Alt keys are told apart", () => {
             Assert(DoubleTapHook.Classify(0xA2) == TapKey.LeftCtrl && DoubleTapHook.Classify(0xA3) == TapKey.RightCtrl);
             Assert(DoubleTapHook.Classify(0xA0) == TapKey.LeftShift && DoubleTapHook.Classify(0xA1) == TapKey.RightShift);
-            Assert(DoubleTapHook.Classify(0x41) == TapKey.Other && DoubleTapHook.Classify(0x11) == TapKey.Other && DoubleTapHook.Classify(0x12) == TapKey.Other && DoubleTapHook.Classify(0xA4) == TapKey.Other);
+            Assert(DoubleTapHook.Classify(0xA4) == TapKey.LeftAlt && DoubleTapHook.Classify(0xA5) == TapKey.RightAlt);
+            Assert(DoubleTapHook.Classify(0x41) == TapKey.Other && DoubleTapHook.Classify(0x11) == TapKey.Other && DoubleTapHook.Classify(0x12) == TapKey.Other && DoubleTapHook.Classify(0x5B) == TapKey.Other);
         });
     }
 

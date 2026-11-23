@@ -89,9 +89,9 @@ Windowsのウィジェットホストは表示カードを保存する場合が�
 
 ### キーボードのフック（2回押しのショートカット）
 
-`now_doing_hotkey` に `DoubleCtrl`・`DoubleLeftCtrl`・`DoubleRightCtrl`・`DoubleShift`・`DoubleLeftShift`・`DoubleRightShift` のどれかを書いたときだけ、トレイアプリが動いている間、キーボード全体の入力を受ける仕組み（Windows の `WH_KEYBOARD_LL` のフック）を入れます。
+`now_doing_hotkey` に `DoubleCtrl`・`DoubleLeftCtrl`・`DoubleRightCtrl`・`DoubleShift`・`DoubleLeftShift`・`DoubleRightShift`・`DoubleAlt`・`DoubleLeftAlt`・`DoubleRightAlt` のどれかを書いたときだけ、トレイアプリが動いている間、キーボード全体の入力を受ける仕組み（Windows の `WH_KEYBOARD_LL` のフック）を入れます。
 
-- 見るもの: キーが左右の Ctrl・Shift のどれかかどうか、押したか離したか、その時刻。ほかのキーについては「ほかのキーが押された」という事実だけ。
+- 見るもの: キーが左右の Ctrl・Shift・Alt のどれかかどうか、押したか離したか、その時刻。ほかのキーについては「ほかのキーが押された」という事実だけ。
 - 見ないもの・残さないもの: ほかのキーがどのキーか、入力した文字。何もファイルに保存せず、どこにも送りません。2回押しを見つけるために、直前の押し離しの時刻をメモリーに持つだけです。
 - 止めない・変えない: すべてのキーを、そのまま前にあるアプリに渡します（2回押しのキーも止めません）。
 - キーを送るのは1つの場合だけです: 2回押しで開いた窓が Windows の決まりで前に出られず、キーを送らない方法でもだめだったときに、どの機能にも割り当てられていない仮想キー（`0xE8`）の押し離しを1回送ります。Stream Deck のキーや RegisterHotKey のショートカットキーで開いたときは送りません。

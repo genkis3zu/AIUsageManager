@@ -5,12 +5,13 @@ using System.Threading;
 
 namespace AIUsageManager
 {
-    // now_doing_hotkey=DoubleCtrl …: which key opens the いまやってること window when pressed twice. Alt is not offered,
-    // because pressing Alt alone changes what many apps do (their menu or key tips).
-    internal enum DoubleTapKey { None, Ctrl, LeftCtrl, RightCtrl, Shift, LeftShift, RightShift }
+    // now_doing_hotkey=DoubleCtrl …: which key opens the いまやってること window when pressed twice. Alt was added at the
+    // user's request (2026-11-23); pressing Alt alone makes many apps show their menu or key tips, and the hook does not
+    // stop that.
+    internal enum DoubleTapKey { None, Ctrl, LeftCtrl, RightCtrl, Shift, LeftShift, RightShift, Alt, LeftAlt, RightAlt }
 
-    // What the keyboard hook tells the detector about a key: one of the four keys a double press can use, or "another key".
-    internal enum TapKey { LeftCtrl, RightCtrl, LeftShift, RightShift, Other }
+    // What the keyboard hook tells the detector about a key: one of the six keys a double press can use, or "another key".
+    internal enum TapKey { LeftCtrl, RightCtrl, LeftShift, RightShift, LeftAlt, RightAlt, Other }
 
     // Finds the chosen key pressed twice: each press at most 300 ms long, the second press at most 400 ms after the first
     // one was let go, and no other key pressed in between or while the key is held (so Ctrl+C or Shift+A never count).
@@ -34,6 +35,9 @@ namespace AIUsageManager
                 case DoubleTapKey.Shift: return pressed == TapKey.LeftShift || pressed == TapKey.RightShift;
                 case DoubleTapKey.LeftShift: return pressed == TapKey.LeftShift;
                 case DoubleTapKey.RightShift: return pressed == TapKey.RightShift;
+                case DoubleTapKey.Alt: return pressed == TapKey.LeftAlt || pressed == TapKey.RightAlt;
+                case DoubleTapKey.LeftAlt: return pressed == TapKey.LeftAlt;
+                case DoubleTapKey.RightAlt: return pressed == TapKey.RightAlt;
                 default: return false;
             }
         }
@@ -70,7 +74,7 @@ namespace AIUsageManager
     }
 
     // A low-level keyboard hook (WH_KEYBOARD_LL) for the double press. Of every key event it uses only whether the key is
-    // the left or right Ctrl or Shift, whether it went down or up, and its time; for any other key only that one was
+    // the left or right Ctrl, Shift or Alt, whether it went down or up, and its time; for any other key only that one was
     // pressed. Nothing is kept or sent, and every event goes on to the other apps unchanged.
     internal sealed class DoubleTapHook : IDisposable
     {
@@ -126,6 +130,8 @@ namespace AIUsageManager
                 case 0xA3: return TapKey.RightCtrl;
                 case 0xA0: return TapKey.LeftShift;
                 case 0xA1: return TapKey.RightShift;
+                case 0xA4: return TapKey.LeftAlt;
+                case 0xA5: return TapKey.RightAlt;
                 default: return TapKey.Other;
             }
         }

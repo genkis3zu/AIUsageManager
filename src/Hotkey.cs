@@ -12,14 +12,16 @@ namespace AIUsageManager
         public int Modifiers;
         public Keys Key;
         public string Text;
-        // DoubleCtrl, DoubleLeftCtrl, DoubleRightCtrl, DoubleShift, DoubleLeftShift or DoubleRightShift: the key pressed
-        // twice opens the window (found by a keyboard hook, not registered with Windows). None for Ctrl+Alt+N and the like.
+        // DoubleCtrl, DoubleLeftCtrl, DoubleRightCtrl, DoubleShift, DoubleLeftShift, DoubleRightShift, DoubleAlt,
+        // DoubleLeftAlt or DoubleRightAlt: the key pressed twice opens the window (found by a keyboard hook, not
+        // registered with Windows). None for Ctrl+Alt+N and the like.
         public DoubleTapKey Double;
 
-        static readonly string[] DoubleNames = { "DoubleCtrl", "DoubleLeftCtrl", "DoubleRightCtrl", "DoubleShift", "DoubleLeftShift", "DoubleRightShift" };
-        static readonly DoubleTapKey[] DoubleKeys = { DoubleTapKey.Ctrl, DoubleTapKey.LeftCtrl, DoubleTapKey.RightCtrl, DoubleTapKey.Shift, DoubleTapKey.LeftShift, DoubleTapKey.RightShift };
+        static readonly string[] DoubleNames = { "DoubleCtrl", "DoubleLeftCtrl", "DoubleRightCtrl", "DoubleShift", "DoubleLeftShift", "DoubleRightShift", "DoubleAlt", "DoubleLeftAlt", "DoubleRightAlt" };
+        static readonly DoubleTapKey[] DoubleKeys = { DoubleTapKey.Ctrl, DoubleTapKey.LeftCtrl, DoubleTapKey.RightCtrl, DoubleTapKey.Shift, DoubleTapKey.LeftShift, DoubleTapKey.RightShift,
+            DoubleTapKey.Alt, DoubleTapKey.LeftAlt, DoubleTapKey.RightAlt };
 
-        // One of the six double presses, or at least one of Ctrl, Alt or Win (Shift alone would take a key away from
+        // One of the nine double presses, or at least one of Ctrl, Alt or Win (Shift alone would take a key away from
         // typing) and one key: A–Z, 0–9, F1–F24 or Space. Null when the text is not like that.
         public static NowDoingHotkey Parse(string text)
         {
