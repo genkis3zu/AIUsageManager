@@ -108,6 +108,8 @@ namespace AIUsageManager
     {
         public const string Argument = "--now-doing";
         public const int MaxLength = 200;
+        // Ctrl+Enter: the whole text goes to Claudian (at most 4000 characters) and the 日中ログ gets the first 80.
+        public const int MaxSendLength = 4000, SendHeadLength = 80;
         public const string Mark = "📝";
         static readonly Regex Record = new Regex(@"^\[(\d{2}):(\d{2})", RegexOptions.CultureInvariant);
         static readonly Regex Stamp = new Regex(@"^\[(\d{2}:\d{2})(?:-\d{2}:\d{2})?\]\s*(.*)$", RegexOptions.CultureInvariant);
@@ -135,6 +137,22 @@ namespace AIUsageManager
             string value = (text ?? "").Replace("\r\n", " ").Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Trim();
             if (value.Length > MaxLength) value = value.Substring(0, char.IsHighSurrogate(value[MaxLength - 1]) ? MaxLength - 1 : MaxLength).TrimEnd();
             return value;
+        }
+
+        // The text as it goes to Claudian: LF line breaks, no blank space around it.
+        public static string ForClaudian(string typed)
+        {
+            return (typed ?? "").Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        }
+
+        // The 日中ログ line for a text sent to Claudian: the first line that is not blank, at most 80 characters, and
+        // （Claudian へ・N行） when the text has two lines or more.
+        public static string SendLine(string text)
+        {
+            string[] lines = (text ?? "").Split('\n');
+            string first = lines.Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+            if (first.Length > SendHeadLength) first = first.Substring(0, char.IsHighSurrogate(first[SendHeadLength - 1]) ? SendHeadLength - 1 : SendHeadLength);
+            return lines.Length >= 2 ? first + "（Claudian へ・" + lines.Length.ToString(CultureInfo.InvariantCulture) + "行）" : first;
         }
 
         // `{…}` holds a .NET date format, e.g. C:\Notes\{yyyy}年_日誌\{yyyy-MM-dd} - 日誌.md. Null when the pattern is unusable,
@@ -247,7 +265,7 @@ namespace AIUsageManager
         }
 
         // The new diary text, or null with the reason when the record cannot be added.
-        public static string Insert(string content, DateTime time, string text, NowDoingSettings settings, out NowDoingFailure failure)
+        public static string Insert(string content, DateTime time, string text, NowDoingSettings settings, out NowDoingFailure failure, string mark = Mark)
         {
             failure = NowDoingFailure.None;
             List<Line> lines = Split(content ?? "");
@@ -278,7 +296,7 @@ namespace AIUsageManager
             if (run == 0) added.Add(new Line { Text = "", End = newline });
             // The same two-line form as the other records: the time on its own line, the text on the next.
             added.Add(new Line { Text = "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", End = newline });
-            added.Add(new Line { Text = Mark + " " + text, End = newline });
+            added.Add(new Line { Text = mark + " " + text, End = newline });
             if (run <= 1 && !atEnd) added.Add(new Line { Text = "", End = newline });
             if (at == lines.Count && lines.Count > 0 && lines[lines.Count - 1].End.Length == 0)
             {
@@ -336,7 +354,7 @@ namespace AIUsageManager
 
         // Reads the diary just before writing, adds the line, and overwrites the same file in place (no rename: the
         // diary folder is synced and a rename can look like another file). The previous content is kept in `backupPath`.
-        public static NowDoingFailure Write(NowDoingSettings settings, DateTime openedAt, string text, string backupPath, Action<int> sleep = null)
+        public static NowDoingFailure Write(NowDoingSettings settings, DateTime openedAt, string text, string backupPath, Action<int> sleep = null, string mark = Mark)
         {
             if (string.IsNullOrEmpty(settings.Note)) return NowDoingFailure.NoSetting;
             string path = NotePath(settings.Note, openedAt);
@@ -362,7 +380,7 @@ namespace AIUsageManager
                 catch (SecurityException) { Close(file); file = null; }
                 if (file != null)
                 {
-                    try { return Change(file, old, settings, openedAt, text, backupPath); }
+                    try { return Change(file, old, settings, openedAt, text, backupPath, mark); }
                     finally { Close(file); }
                 }
                 // Another app may be writing the diary. Nothing has been changed yet, so it is tried again:
@@ -382,13 +400,13 @@ namespace AIUsageManager
         // Adds the record to the open diary. The backup is written before the diary is touched; once writing the diary
         // has started, a failure is reported as it is and never retried, so the record is not added twice and the
         // backup keeps the content from before.
-        static NowDoingFailure Change(FileStream file, byte[] old, NowDoingSettings settings, DateTime openedAt, string text, string backupPath)
+        static NowDoingFailure Change(FileStream file, byte[] old, NowDoingSettings settings, DateTime openedAt, string text, string backupPath, string mark)
         {
             bool bom;
             string content;
             if (!Decode(old, out bom, out content)) return NowDoingFailure.BadEncoding;
             NowDoingFailure failure;
-            string updated = Insert(content, openedAt, text, settings, out failure);
+            string updated = Insert(content, openedAt, text, settings, out failure, mark);
             if (updated == null) return failure;
             byte[] body = new UTF8Encoding(false).GetBytes(updated);
             var bytes = new byte[(bom ? 3 : 0) + body.Length];
@@ -430,9 +448,10 @@ namespace AIUsageManager
             catch (SecurityException) { }
         }
 
-        public static string BackupPath(string localAppData)
+        // The window keeps now-doing-last.md; the tray app's AI done lines keep their own file, so neither replaces the other's.
+        public static string BackupPath(string localAppData, string name = "now-doing-last.md")
         {
-            return string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "AIUsageManager", "now-doing-last.md");
+            return string.IsNullOrEmpty(localAppData) ? null : Path.Combine(localAppData, "AIUsageManager", name);
         }
 
         // ---- Handing a line to Claudian (Ctrl+Enter, only with now_doing_claudian=on) ----
@@ -475,11 +494,13 @@ namespace AIUsageManager
         }
 
         // False when the file cannot be written or Obsidian cannot be opened; the text is not left behind then.
-        public static bool HandToClaudian(string text, string messagePath, string vault, Func<string, bool> open, string token = null, long? now = null)
+        public static bool HandToClaudian(string text, string messagePath, string vault, Func<string, bool> open, string token = null, long? now = null, string note = null)
         {
             if (string.IsNullOrEmpty(messagePath)) return false;
             token = token ?? NewToken();
             var data = new Dictionary<string, object> { { "token", token }, { "text", text }, { "created", now ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } };
+            // The diary page the line was written to; the plugin opens it before sending when it is in the vault.
+            if (note != null) data["note"] = note;
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(messagePath));

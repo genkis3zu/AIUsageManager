@@ -204,6 +204,36 @@ internal static partial class Tests
             Assert(!NowDoingNote.HandToClaudian("x", message, null, link => false) && !File.Exists(message));
             Assert(!NowDoingNote.HandToClaudian("x", null, null, link => { links.Add(link); return true; }) && links.Count == 1);
             Assert(NowDoingNote.ClaudianMessagePath(@"C:\Users\a\AppData\Local") == @"C:\Users\a\AppData\Local\AIUsageManager\claudian-message.json" && NowDoingNote.ClaudianMessagePath("") == null);
+            Assert(!data.ContainsKey("note"));
+        });
+        Check("The message for Claudian carries the diary page", () => {
+            string message = Path.Combine(dir, "local", "AIUsageManager", "claudian-message.json");
+            Assert(NowDoingNote.HandToClaudian("見積", message, "V", link => true, note: @"C:\V\日誌.md"));
+            var data = (System.Collections.Generic.Dictionary<string, object>)new System.Web.Script.Serialization.JavaScriptSerializer().DeserializeObject(File.ReadAllText(message, Encoding.UTF8));
+            Assert((string)data["note"] == @"C:\V\日誌.md" && (string)data["text"] == "見積");
+        });
+        Check("The line for the 日中ログ when sending is the first line, cut at 80, with the line count", () => {
+            Assert(NowDoingNote.SendLine("見積の表") == "見積の表");
+            Assert(NowDoingNote.SendLine(NowDoingNote.ForClaudian("\n\n  一行目  \n二行目\n\n四行目")) == "一行目（Claudian へ・4行）");
+            Assert(NowDoingNote.SendLine(new string('あ', 100)) == new string('あ', 80));
+            Assert(NowDoingNote.SendLine(new string('あ', 100) + "\n次") == new string('あ', 80) + "（Claudian へ・2行）");
+            Assert(NowDoingNote.SendLine(new string('a', 79) + "💊") == new string('a', 79));
+            Assert(NowDoingNote.MaxSendLength == 4000 && NowDoingNote.SendHeadLength == 80);
+        });
+        Check("Text for Claudian keeps its line breaks as LF", () => {
+            Assert(NowDoingNote.ForClaudian(" a\r\nb\rc \n") == "a\nb\nc" && NowDoingNote.ForClaudian(null) == "");
+        });
+        Check("A line with another mark goes where a 📝 line would, and is not one of today's records", () => {
+            NowDoingFailure failure;
+            var settings = new NowDoingSettings { Before = "📎 **今日の生成物**" };
+            string done = NowDoingNote.Insert(note, new DateTime(2026, 11, 24, 10, 40, 0), "Claude 完了: x", settings, out failure, "🤖");
+            Assert(failure == NowDoingFailure.None && done == note.Replace("[11:05]\n", "[10:40]\n🤖 Claude 完了: x\n\n[11:05]\n"));
+            Assert(Shown(NowDoingNote.Records(done, settings, out failure)) == "");
+            Assert(NowDoingNote.BackupPath(@"C:\L", "ai-done-last.md") == @"C:\L\AIUsageManager\ai-done-last.md" && NowDoingNote.BackupPath(@"C:\L") == @"C:\L\AIUsageManager\now-doing-last.md");
+            string real = Path.Combine(dir, "2026-11-24.md");
+            File.WriteAllText(real, note, new UTF8Encoding(false));
+            Assert(NowDoingNote.Write(at("{yyyy-MM-dd}.md"), new DateTime(2026, 11, 24, 10, 40, 0), "Codex 完了: y", backup, null, "🤖") == NowDoingFailure.None);
+            Assert(File.ReadAllText(real, Encoding.UTF8) == note.Replace("[11:05]\n", "[10:40]\n🤖 Codex 完了: y\n\n[11:05]\n"));
         });
         Check("The shortcut key is read from now_doing_hotkey and needs Ctrl, Alt or Win with one key", () => {
             Assert(NowDoingSettings.Parse("now_doing_hotkey=Ctrl+Alt+N\n").Hotkey == "Ctrl+Alt+N" && NowDoingSettings.Parse("").Hotkey == null);

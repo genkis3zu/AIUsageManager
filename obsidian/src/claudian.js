@@ -7,12 +7,13 @@ const fs=require('node:fs');
 const path=require('node:path');
 const ACTION='ai-usage-manager-claudian';
 const VIEW_TYPE='claudian-view';
-const MAX_AGE_MS=120000,MAX_FILE=16384,MAX_TEXT=1000;
+const MAX_AGE_MS=120000,MAX_FILE=65536,MAX_TEXT=4000,MAX_NOTE=1024;
 function messagePath(env=process.env) {
   const base=env&&env.LOCALAPPDATA;
   return typeof base==='string'&&base?path.join(base,'AIUsageManager','claudian-message.json'):null;
 }
-// The text to send, or null. A file whose token matches is removed, whether or not it is still fresh.
+// {text, note} to send, or null. `note` is the diary page the window wrote to (null when not given).
+// A file whose token matches is removed, whether or not it is still fresh.
 function takeMessage(token,file,now=Date.now(),files=fs) {
   if(typeof token!=='string'||!/^[0-9a-f]{32}$/.test(token)||!file)return null;
   let data;
@@ -26,7 +27,25 @@ function takeMessage(token,file,now=Date.now(),files=fs) {
   const created=data.created;
   if(typeof created!=='number'||!Number.isFinite(created)||now-created>MAX_AGE_MS||created-now>5000)return null;
   const text=typeof data.text==='string'?data.text.trim():'';
-  return text&&text.length<=MAX_TEXT?text:null;
+  if(!text||text.length>MAX_TEXT)return null;
+  const note=typeof data.note==='string'&&data.note.length<=MAX_NOTE?data.note:null;
+  return {text,note};
+}
+// Opens the diary page in the current tab when it is a file of this vault, so Claudian sees it as the open note.
+// True when it was opened. A page outside the vault, or one the vault does not have, is not opened.
+async function openNote(app,note) {
+  try {
+    if(typeof note!=='string'||!path.win32.isAbsolute(note))return false;
+    const adapter=app&&app.vault&&app.vault.adapter;
+    const base=adapter&&typeof adapter.getBasePath==='function'?adapter.getBasePath():null;
+    if(typeof base!=='string'||!base)return false;
+    const inside=path.win32.relative(base,note);
+    if(!inside||inside==='..'||inside.startsWith('..\\')||path.win32.isAbsolute(inside))return false;
+    const file=app.vault.getAbstractFileByPath(inside.split('\\').join('/'));
+    if(!file||typeof file.extension!=='string')return false;
+    await app.workspace.getLeaf(false).openFile(file);
+    return true;
+  } catch {return false;}
 }
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 // Opens Claudian's chat and sends the text as a new message there, as if it had been typed into Claudian.
@@ -50,4 +69,4 @@ async function sendToClaudian(app,text,pause=wait) {
   }
   return 'Claudian に送れませんでした。Claudian の版が変わった可能性があります';
 }
-module.exports={ACTION,messagePath,takeMessage,sendToClaudian,MAX_AGE_MS};
+module.exports={ACTION,messagePath,takeMessage,openNote,sendToClaudian,MAX_AGE_MS,MAX_TEXT};

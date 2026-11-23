@@ -67,9 +67,12 @@ class UsagePlugin extends Plugin {
   }
   async sendToClaudian(params) {
     if(this.closed)return;
-    const text=claudian.takeMessage(params&&params.token,claudian.messagePath());
-    if(text===null){new Notice('Claudian に送る内容が見つかりません（古いか、もう送ってあります）');return;}
-    const problem=await claudian.sendToClaudian(this.app,text);
+    const message=claudian.takeMessage(params&&params.token,claudian.messagePath());
+    if(message===null){new Notice('Claudian に送る内容が見つかりません（古いか、もう送ってあります）');return;}
+    // The diary page the line was written to is opened first, so Claudian has it as the open note.
+    await claudian.openNote(this.app,message.note);
+    if(this.closed)return;
+    const problem=await claudian.sendToClaudian(this.app,message.text);
     if(problem&&!this.closed)new Notice(problem);
   }
   onunload() {this.closed=true;clearTimeout(this.settingsTimer);clearTimeout(this.refreshTimer);this.bridge?.dispose();for(const toolbar of this.toolbars?.values()||[])toolbar.destroy();this.toolbars?.clear();}
