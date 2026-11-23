@@ -21,6 +21,8 @@ namespace AIUsageManager
         public Func<string, bool> Send;
         // The after script (now_doing_after): (mode "record" or "send", text). Null when it is not set.
         public Func<string, string, Task<NowDoingScriptResult>> After;
+        // The list script (now_doing_list), run when the window opens and stopped when it closes.
+        public Func<CancellationToken, Task<NowDoingScriptResult>> List;
         // The buttons (now_doing_button1 … 9, at Number-1), a copy button's command, and what copy does with its output.
         public NowDoingButton[] Buttons = new NowDoingButton[NowDoingButton.Count];
         public Func<string, Task<NowDoingScriptResult>> Copy;
@@ -70,7 +72,9 @@ namespace AIUsageManager
         public const string ClipboardBusy = "クリップボードに入れられませんでした";
         public static string CopyFailed(string reason) { return "コピーできませんでした: " + reason; }
         // Layout in 96-DPI units; everything is multiplied by the screen's scale.
-        const float Width96 = 520, Pad = 20, FieldTop = 98, FieldPadding = 20, RowHeight = 26, ButtonRow = 34;
+        const float Width96 = 520, Pad = 20, ContentTop = 98, FieldPadding = 20, RowHeight = 26, ButtonRow = 34, TodoRow = 22;
+        public const int MaxTodo = 5, LeastShown = 3;
+        public const string TodoFailed = "まだのことを出せませんでした";
 
         readonly DateTime openedAt;
         readonly NowDoingView view;
@@ -86,7 +90,12 @@ namespace AIUsageManager
         Font title, strong, body, small, smallStrong;
         float scale = 1;
         // Where the parts are, from the top (96-DPI units); they move as the box grows.
-        float fieldHeight = 42, statusTop = 146, listTop = 176;
+        float fieldTop = ContentTop, fieldHeight = 42, statusTop = 146, listTop = 176;
+        // How many of today's records fit on the screen (at most six, at least three).
+        int shownCount;
+        // まだのこと: the list script's lines, shown above the box. The script is stopped when the window closes.
+        readonly List<string> todo = new List<string>();
+        CancellationTokenSource listing;
         int lines = 1;
         string status;
         bool statusIsFailure, statusIsHint, busy;
@@ -133,6 +142,7 @@ namespace AIUsageManager
             if (!string.IsNullOrEmpty(actions.Notice)) footer.Add(new KeyValuePair<string, bool>(actions.Notice, true));
             // Newest first; only the last few fit.
             for (int i = view.Records.Count - 1; i >= 0 && shown.Count < MaxShown; i--) shown.Add(view.Records[i]);
+            shownCount = shown.Count;
             if (view.Failure == NowDoingFailure.None) ShowHint(); else ShowStatus(actions.Describe(view.Failure), true);
             try { Icon = new Icon(typeof(NowDoingForm).Assembly.GetManifestResourceStream("AIUsageManager.App.ico")); } catch (ArgumentException) { }
         }
@@ -155,7 +165,8 @@ namespace AIUsageManager
             }
         }
         public string Folder { get { return view.Path == null ? "" : System.IO.Path.GetDirectoryName(view.Path); } }
-        public IList<NowDoingRecord> ShownRecords { get { return shown.AsReadOnly(); } }
+        public IList<NowDoingRecord> ShownRecords { get { return shown.GetRange(0, shownCount).AsReadOnly(); } }
+        public IList<string> Todo { get { return todo.AsReadOnly(); } }
         // The buttons in number order, and the small lines at the bottom of the window.
         public IList<Button> ButtonControls { get { return buttons.AsReadOnly(); } }
         public IList<string> Footer { get { return footer.ConvertAll(f => f.Key).AsReadOnly(); } }
@@ -177,7 +188,17 @@ namespace AIUsageManager
         int Px(float value) { return (int)Math.Round(value * scale); }
         Rectangle Box(float x, float y, float w, float h) { return new Rectangle(Px(x), Px(y), Px(w), Px(h)); }
         static Font Make(float size, bool bold) { return new Font("Yu Gothic UI", size, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel); }
-        float FooterTop { get { return HasList ? listTop + 34 + Math.Max(1, shown.Count) * RowHeight + 14 : statusTop + 20 + 16; } }
+        float FooterTop { get { return HasList ? listTop + 34 + Math.Max(1, shownCount) * RowHeight + 14 : statusTop + 20 + 16; } }
+
+        // How many of today's records to show: up to six, fewer when the window would be taller than `available`
+        // (the rest of the window is `other` high), but never fewer than three. One row ("まだありません") without records.
+        internal static int RecordRows(int records, float available, float other, float row)
+        {
+            if (records <= 0) return 1;
+            int rows = Math.Min(records, MaxShown), least = Math.Min(records, LeastShown);
+            while (rows > least && other + rows * row > available) rows--;
+            return rows;
+        }
         float ContentHeight { get { return FooterTop + (footer.Count == 0 ? 0 : footer.Count * 18 + 8); } }
 
         bool placed;
@@ -197,9 +218,12 @@ namespace AIUsageManager
         void Place()
         {
             int lineHeight = input.Font.Height;
+            Rectangle area = Screen.FromPoint(placed ? Location : Cursor.Position).WorkingArea;
+            // まだのこと, when there is any, goes above the box: a heading and one row per line.
+            fieldTop = ContentTop + (todo.Count == 0 ? 0 : 18 + todo.Count * TodoRow + 8);
             fieldHeight = (Px(FieldPadding) + lineHeight * lines) / scale;
             // The buttons go under the box, left to right in number order; one that does not fit starts the next row.
-            float buttonsTop = FieldTop + fieldHeight + 8;
+            float buttonsTop = fieldTop + fieldHeight + 8;
             int x = Px(Pad), right = Px(Width96 - Pad), row = 0;
             foreach (Button button in buttons)
             {
@@ -209,13 +233,15 @@ namespace AIUsageManager
                 button.SetBounds(x, Px(buttonsTop + row * ButtonRow), width, Px(28));
                 x += width + Px(6);
             }
-            statusTop = buttons.Count == 0 ? FieldTop + fieldHeight + 6 : buttonsTop + (row + 1) * ButtonRow + 2;
+            statusTop = buttons.Count == 0 ? fieldTop + fieldHeight + 6 : buttonsTop + (row + 1) * ButtonRow + 2;
             listTop = statusTop + 30;
+            // Today's records: fewer of them when the window would not fit on the screen.
+            shownCount = shown.Count;
+            if (HasList) shownCount = Math.Min(shown.Count, RecordRows(shown.Count, area.Height / scale - 32, ContentHeight - Math.Max(1, shownCount) * RowHeight, RowHeight));
             ClientSize = new Size(Px(Width96), Px(ContentHeight));
-            Rectangle field = Box(Pad, FieldTop, Width96 - 2 * Pad, fieldHeight);
+            Rectangle field = Box(Pad, fieldTop, Width96 - 2 * Pad, fieldHeight);
             input.SetBounds(field.Left + Px(12), field.Top + Px(FieldPadding / 2), field.Width - Px(24), lineHeight * lines);
             close.SetBounds(Px(Width96 - 12 - 30), Px(10), Px(30), Px(30));
-            Rectangle area = Screen.FromPoint(placed ? Location : Cursor.Position).WorkingArea;
             // At first in the middle of the screen that has the mouse pointer; once shown, it stays where it is (it may
             // be dragged), and only moves up when it grows past the bottom of the screen.
             if (!placed) Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
@@ -237,7 +263,30 @@ namespace AIUsageManager
         protected override void OnLoad(EventArgs e) { Arrange(); base.OnLoad(e); }
         // Moving to a screen with another scale lays the window out again for it.
         protected override void OnDpiChanged(DpiChangedEventArgs e) { base.OnDpiChanged(e); Arrange(); Invalidate(); }
-        protected override void OnShown(EventArgs e) { base.OnShown(e); placed = true; Activate(); input.Focus(); FitLines(); }
+        protected override void OnShown(EventArgs e) { base.OnShown(e); placed = true; Activate(); input.Focus(); FitLines(); ReadTodo(); }
+        protected override void OnFormClosed(FormClosedEventArgs e)
+        {
+            // A list script that has not finished is stopped (with what it started), not left running.
+            if (listing != null) listing.Cancel();
+            base.OnFormClosed(e);
+        }
+
+        // Runs the list script in the background; the box can be used meanwhile.
+        async void ReadTodo()
+        {
+            if (actions.List == null) return;
+            listing = new CancellationTokenSource();
+            NowDoingScriptResult result = await actions.List(listing.Token);
+            if (IsDisposed || listing.IsCancellationRequested) return;
+            if (!result.Ok) footer.Add(new KeyValuePair<string, bool>(TodoFailed, false));
+            else
+                foreach (string raw in result.Output.Split('\n'))
+                {
+                    string line = raw.Trim();
+                    if (line.Length > 0 && todo.Count < MaxTodo) todo.Add(line);
+                }
+            if (todo.Count > 0 || !result.Ok) Place();
+        }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             // While a script runs after writing, the window waits for it (at most 10 s), so a send to Claudian is not lost.
@@ -288,9 +337,16 @@ namespace AIUsageManager
             // Where the record goes: the page and section, then the folder (shortened in the middle when long).
             Draw(g, Page, strong, view.Path == null ? palette.Muted : palette.Ink, Box(Pad, 48, inner, 22), TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
             Draw(g, Folder, small, palette.Muted, Box(Pad, 70, inner, 18), TextFormatFlags.Left | TextFormatFlags.PathEllipsis);
+            // まだのこと from the list script: shown only, nothing happens on a click.
+            if (todo.Count > 0)
+            {
+                Draw(g, "まだのこと", smallStrong, palette.Muted, Box(Pad, ContentTop, 200, 18), TextFormatFlags.Left);
+                for (int i = 0; i < todo.Count; i++)
+                    Draw(g, todo[i], body, palette.Ink, Box(Pad, ContentTop + 18 + i * TodoRow, inner, TodoRow), TextFormatFlags.Left | TextFormatFlags.EndEllipsis);
+            }
             // The input box.
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            Rectangle field = Box(Pad, FieldTop, inner, fieldHeight);
+            Rectangle field = Box(Pad, fieldTop, inner, fieldHeight);
             using (GraphicsPath path = Rounded(field, Px(8)))
             {
                 using (var fill = new SolidBrush(palette.Hover)) g.FillPath(fill, path);
@@ -310,23 +366,23 @@ namespace AIUsageManager
             using (var pen = new Pen(palette.Separator)) g.DrawLine(pen, Px(Pad), Px(listTop), Px(Pad + inner), Px(listTop));
             Draw(g, "今日の記録", smallStrong, palette.Muted, Box(Pad, listTop + 10, 200, 18), TextFormatFlags.Left);
             int count = view.Records.Count;
-            string total = count == 0 ? "" : count > shown.Count ? count + " 件（新しい " + shown.Count + " 件）" : count + " 件";
+            string total = count == 0 ? "" : count > shownCount ? count + " 件（新しい " + shownCount + " 件）" : count + " 件";
             Draw(g, total, small, palette.Muted, Box(Pad + 200, listTop + 10, inner - 200, 18), TextFormatFlags.Right);
             float top = listTop + 34;
-            if (shown.Count == 0) { Draw(g, "まだありません", body, palette.Muted, Box(Pad, top, inner, RowHeight), TextFormatFlags.Left); return; }
+            if (shownCount == 0) { Draw(g, "まだありません", body, palette.Muted, Box(Pad, top, inner, RowHeight), TextFormatFlags.Left); return; }
             // A thin line through dots, newest at the top in the accent color.
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            if (shown.Count > 1)
+            if (shownCount > 1)
                 using (var pen = new Pen(palette.Separator, Math.Max(1f, 1.5f * scale)))
-                    g.DrawLine(pen, Px(Pad + 4), Px(top + RowHeight / 2), Px(Pad + 4), Px(top + (shown.Count - 0.5f) * RowHeight));
-            for (int i = 0; i < shown.Count; i++)
+                    g.DrawLine(pen, Px(Pad + 4), Px(top + RowHeight / 2), Px(Pad + 4), Px(top + (shownCount - 0.5f) * RowHeight));
+            for (int i = 0; i < shownCount; i++)
             {
                 float y = top + i * RowHeight;
                 using (var dot = new SolidBrush(i == 0 ? palette.Blue : palette.Fill))
                     g.FillEllipse(dot, Px(Pad + 4) - Px(3.5f), Px(y + RowHeight / 2) - Px(3.5f), Px(7), Px(7));
             }
             g.SmoothingMode = SmoothingMode.None;
-            for (int i = 0; i < shown.Count; i++)
+            for (int i = 0; i < shownCount; i++)
             {
                 float y = top + i * RowHeight;
                 Draw(g, shown[i].Time, body, palette.Muted, Box(Pad + 18, y, 48, RowHeight), TextFormatFlags.Left);
@@ -454,6 +510,7 @@ namespace AIUsageManager
             if (disposing)
             {
                 tips.Dispose();
+                if (listing != null) listing.Dispose();
                 foreach (Font font in new[] { title, strong, body, small, smallStrong }) if (font != null) font.Dispose();
             }
             base.Dispose(disposing);
@@ -506,6 +563,8 @@ namespace AIUsageManager
                     };
                     if (settings.Claudian && note != null)
                         actions.Send = text => NowDoingNote.HandToClaudian(text, message, NowDoingNote.VaultName(note), NowDoingNote.OpenLink, note: note);
+                    if (settings.List != null && note != null)
+                        actions.List = token => NowDoingScript.RunAsync(settings.List, new[] { "--note", note }, workdir, NowDoingScriptLimits.List, token);
                     if (settings.After != null && note != null)
                     {
                         string time = openedAt.ToString("HH:mm", CultureInfo.InvariantCulture);

@@ -348,6 +348,44 @@ internal static class UiTests
             SaveNowDoing(form,"now-doing-button-problem-dark.png");
         }
     }
+    static void CheckNowDoingTodo()
+    {
+        var opened=new DateTime(2026,11,24,11,5,0);var view=TodayView();var written=new List<string>();
+        int plainTop;
+        using(var plain=new NowDoingForm(opened,view,Actions(written,null),ThemePalette.Light)){plain.Show();Application.DoEvents();plainTop=Field<TextBox>(plain,"input").Top;}
+        var listed=Actions(written,null);listed.List=token=>Result(true,"🚶 散歩がまだ\nDW#1 見積\n\n  ⚠️ 注意  \n📈 今日の1%\n六行目\n七行目");
+        using(var form=new NowDoingForm(opened,view,listed,ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Todo.SequenceEqual(new[]{"🚶 散歩がまだ","DW#1 見積","⚠️ 注意","📈 今日の1%","六行目"}),"The list script's lines show as まだのこと, at most five, without blank lines");
+            Assert(Field<TextBox>(form,"input").Top>plainTop&&form.Footer.Count==0,"まだのこと sits above the box");
+            SaveNowDoing(form,"now-doing-todo-light.png");
+        }
+        var empty=Actions(written,null);empty.List=token=>Result(true,"");
+        using(var form=new NowDoingForm(opened,view,empty,ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Todo.Count==0&&form.Footer.Count==0&&Field<TextBox>(form,"input").Top==plainTop,"A list script that prints nothing shows no まだのこと");
+        }
+        var failing=Actions(written,null);failing.List=token=>Result(false,"","時間切れ（3秒）");
+        using(var form=new NowDoingForm(opened,view,failing,ThemePalette.Dark))
+        {
+            form.Show();Application.DoEvents();
+            Assert(form.Todo.Count==0&&form.Footer.Count==1&&form.Footer[0]==NowDoingForm.TodoFailed,"A failed list script shows no list and a small note at the bottom");
+            SaveNowDoing(form,"now-doing-todo-failed-dark.png");
+        }
+        CancellationToken seen=CancellationToken.None;
+        var hanging=Actions(written,null);hanging.List=token=>{seen=token;return new TaskCompletionSource<NowDoingScriptResult>().Task;};
+        using(var form=new NowDoingForm(opened,view,hanging,ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();
+            Assert(seen.CanBeCanceled&&!seen.IsCancellationRequested,"The list script runs while the window is open");
+            form.Close();Application.DoEvents();
+            Assert(seen.IsCancellationRequested,"Closing the window stops a list script that is still running");
+        }
+        Assert(NowDoingForm.RecordRows(8,600,400,26)==6&&NowDoingForm.RecordRows(8,500,400,26)==3&&NowDoingForm.RecordRows(8,420,400,26)==3
+            &&NowDoingForm.RecordRows(8,530,400,26)==5&&NowDoingForm.RecordRows(2,100,400,26)==2&&NowDoingForm.RecordRows(0,600,400,26)==1,"Fewer of today's records are shown on a short screen, never fewer than three");
+    }
     [STAThread]
     static int Main()
     {
@@ -364,6 +402,7 @@ internal static class UiTests
             CheckNowDoingWindow();
             CheckNowDoingInput();
             CheckNowDoingButtons();
+            CheckNowDoingTodo();
             CheckHotkeyAndDrag();
             using(var signal=new EventWaitHandle(false,EventResetMode.AutoReset))
             using(var refreshSignal=new EventWaitHandle(false,EventResetMode.AutoReset))
