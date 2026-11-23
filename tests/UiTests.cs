@@ -360,6 +360,7 @@ internal static class UiTests
                 context=new TrayContext(false,waitingShow,new FakeSource(),new ThemeSettings(Path.Combine(waitingFixture,"settings.ini")),new FakeLogin(),null,text=>{},waitingSnapshots,null,null,waitingSource,text=>waitingNotices.Add(text));
                 Field<System.Windows.Forms.Timer>(context,"waitingTimer").Interval=50;
                 var waitingPopup=Field<PopupForm>(context,"popup");
+                Assert(!Field<ContextMenuStrip>(context,"menu").Items.Contains(Field<ToolStripMenuItem>(context,"startupMenu")),"A test run without its own sign-in store never reads or changes the real entry");
                 var unreadable=new WaitingList{Unreadable=new[]{new WaitingUnreadable{Service="Codex",Reason="記録を読めません"}}};
                 var finishedOnly=new WaitingList{Items=new[]{new WaitingItem{Key="Claude/x",Service="Claude",Place="P",App="claude",Reason=WaitReason.Finished,Since=DateTimeOffset.Now}}};
                 Assert(PopupForm.WaitingHeading(unreadable)=="対応待ちを確認できません"&&PopupForm.WaitingHeading(finishedOnly)=="対応待ちなし","The tray never says 対応待ちなし when a record could not be read");
@@ -376,8 +377,8 @@ internal static class UiTests
             using(var startupShow=new EventWaitHandle(false,EventResetMode.AutoReset))
             {
                 string startupFixture=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-fixtures",Guid.NewGuid().ToString("N"));Directory.CreateDirectory(startupFixture);
-                var startup=new FakeStartup();
-                context=new TrayContext(false,startupShow,new FakeSource(),new ThemeSettings(Path.Combine(startupFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,null,null,null,startup);
+                var startup=new FakeStartup();var startupWarnings=new List<string>();
+                context=new TrayContext(false,startupShow,new FakeSource(),new ThemeSettings(Path.Combine(startupFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,null,null,null,startup,startupWarning:text=>startupWarnings.Add(text));
                 var startupItem=Field<ToolStripMenuItem>(context,"startupMenu");
                 Assert(startupItem.Text=="Windowsのサインイン時に起動"&&!startupItem.Checked&&Field<ContextMenuStrip>(context,"menu").Items.Contains(startupItem),"The tray menu offers starting at sign-in, off at first");
                 startupItem.PerformClick();
@@ -386,9 +387,10 @@ internal static class UiTests
                 Assert(!startupItem.Checked&&startup.Value==null,"Turning it off removes the entry");
                 startup.Value=StartAtSignIn.Command(Application.ExecutablePath);
                 typeof(ToolStripDropDown).GetMethod("OnOpening",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(Field<ContextMenuStrip>(context,"menu"),new object[]{new System.ComponentModel.CancelEventArgs()});
-                Assert(startupItem.Checked,"The menu shows an entry added outside the app when it opens");
+                Assert(startupItem.Checked&&startupWarnings.Count==0,"The menu shows an entry added outside the app when it opens");
                 startup.Fail=true;startupItem.PerformClick();
                 Assert(startupItem.Checked&&startup.Value==StartAtSignIn.Command(Application.ExecutablePath),"A change that cannot be saved leaves the shown state as it is");
+                Assert(startupWarnings.Count==1&&startupWarnings[0]==StartAtSignIn.CouldNotChange,"A change that cannot be saved is reported once");
                 context.ExitThread();context=null;
             }
             Console.WriteLine("RESULT "+passed+" UI checks passed");return 0;

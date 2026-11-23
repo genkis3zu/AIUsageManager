@@ -14,7 +14,7 @@ Windows標準の.NET Framework 4.8、C# 5、Windows Formsを採用します。�
 | `Pace.cs` | 学習状態、90%・95%の予測幅、100%の目安と観測根拠 |
 | `Snapshot.cs` | Obsidian・Stream Deck向け表示データ、現在ユーザー限定の名前付きパイプ、時間・出力量の上限 |
 | `AppLocation.cs` | Stream Deckプラグインがトレイ版を起動するための、実行ファイルの場所の記録 |
-| `Startup.cs` | Windowsのサインイン時の起動（現在のユーザーのRunキーの値）の確認・登録・削除 |
+| `Startup.cs` | Windowsのサインイン時の起動（現在のユーザーのRunキーの値）の確認・登録・削除。Windowsが読める長さ（260文字）を超える場合は登録せず、トレイに出す警告の文を返す |
 | `obsidian/src/` | 固定ツールバー、表示サイズ、鮮度判定、常駐アプリとの連携 |
 | `streamdeck/src/` | Stream Deckのキー表示、名前付きパイプの読み取り、Stream Deckの起動時と未接続のキーを押したときのトレイ版の起動。鮮度判定は `obsidian/src/usage.js` を共用 |
 | `PopupForm.cs` | 使用量と警告帯、ボタン、キーボード、スクロール・DPIレイアウト |

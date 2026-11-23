@@ -18,6 +18,7 @@ const STATUS_SETTINGS = { palette: 'green' };
 function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchApp, now = Date.now, timers }) {
   const keys = new Map();
   let connection = initialConnection(), interval = null, pending = null, manualPath = '', starting = false, startChecked = false, startRun = 0;
+  let settingsReceived = false, startWanted = false;
   const startedAt = now();
   const message = (key, text) => ({ title: key.title, kind: 'message', message: text, caption: '', tone: 'muted', bars: [] });
   const background = promise => { promise.catch(() => {}); };
@@ -51,7 +52,8 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
       // the user may have closed the tray app on purpose. A key press still starts it.
       if (!startChecked && connection.status !== 'loading') {
         startChecked = true;
-        if (connection.status === 'disconnected' && now() - startedAt <= START_WINDOW_MS) await startTray([location.BACKGROUND_START], null);
+        startWanted = connection.status === 'disconnected';
+        await autoStart();
       }
     })();
     return pending;
@@ -64,6 +66,14 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
     deck.showAlert(context);
     render(context);
     timers.setTimeout(() => { const current = keys.get(context); if (current) { current.notice = null; render(context); } }, NOTICE_MS);
+  }
+
+  // The app path set by hand comes with the global settings, which may arrive after the first poll:
+  // the start waits for them, so it starts the copy the user chose and not the one in the location file.
+  async function autoStart() {
+    if (!startWanted || !settingsReceived) return;
+    startWanted = false;
+    if (connection.status === 'disconnected' && now() - startedAt <= START_WINDOW_MS) await startTray([location.BACKGROUND_START], null);
   }
 
   // Starts the tray app and looks for it again after 2, 5 and 10 s. For a press (`context`), a missing or failed
@@ -164,6 +174,8 @@ function createPlugin({ deck, pipe, readSnapshot: read, resolveAppPath, launchAp
       case 'didReceiveGlobalSettings': {
         const settings = payload.settings || {};
         manualPath = typeof settings.appPath === 'string' ? settings.appPath : '';
+        settingsReceived = true;
+        await autoStart();
         return;
       }
       case 'keyDown': {

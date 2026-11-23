@@ -35,6 +35,8 @@ function harness({ reads = [], resolve = () => 'C:\\Apps\\AIUsageManager.exe', l
 // The tray app was running when Stream Deck started and was closed later (after the second read).
 const closedLater = (...after) => [{ kind: 'ok', json: SNAP }, { kind: 'absent' }, ...after];
 async function press(h, context, ms) { await h.plugin.handle({ event: 'keyDown', context }); h.tick(ms); await h.plugin.handle({ event: 'keyUp', context }); }
+// Stream Deck answers getGlobalSettings soon after the plugin starts; the app path set by hand comes with it.
+const globals = (h, appPath) => h.plugin.handle({ event: 'didReceiveGlobalSettings', payload: { settings: appPath ? { appPath } : {} } });
 
 test('a pipe name that could not be found is looked up again on the next poll', async () => {
   const names = [null, 'PIPE'], seen = [];
@@ -294,6 +296,7 @@ test('identical images are not resent', async () => {
 });
 test('when Stream Deck starts without the tray app, the plugin starts it once in the background', async () => {
   const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }, { kind: 'ok', json: SNAP }] });
+  await globals(h);
   await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('s1', ID + '.status'));
   assert.deepEqual(h.launches, ['C:\\Apps\\AIUsageManager.exe']); assert.deepEqual(h.launchArgs, [['--background']]);
   assert.ok(h.images('k1').at(-1).includes('起動中')); assert.ok(h.images('s1').at(-1).includes('起動中'));
@@ -310,6 +313,7 @@ test('a tray app closed after Stream Deck started is not started again by itself
 });
 test('the start waits until a busy pipe has failed twice', async () => {
   const h = harness({ reads: [{ kind: 'failed' }, { kind: 'failed' }] });
+  await globals(h);
   await h.plugin.handle(appear('k1'));
   assert.deepEqual(h.launches, []);
   await h.plugin.poll();
@@ -318,6 +322,7 @@ test('the start waits until a busy pipe has failed twice', async () => {
 test('a start that cannot happen leaves 未接続 without an alert; a press then says what is wrong', async () => {
   for (const options of [{ resolve: () => null }, { launch: async () => { throw new Error('nope'); } }]) {
     const h = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }], ...options });
+    await globals(h);
     await h.plugin.handle(appear('k1'));
     assert.ok(h.images('k1').at(-1).includes('未接続'));
     assert.ok(!h.sent.some(s => s[0] === 'alert')); assert.ok(!h.timers.timeouts.some(t => t.ms === 2000));
@@ -328,15 +333,18 @@ test('a start that cannot happen leaves 未接続 without an alert; a press then
 test('a first key that appears more than a minute after Stream Deck started does not start the tray app', async () => {
   const late = harness({ reads: [{ kind: 'absent' }, { kind: 'absent' }] });
   late.tick(61000);
+  await globals(late);
   await late.plugin.handle(appear('k1'));
   assert.deepEqual(late.launches, []); assert.ok(late.images('k1').at(-1).includes('未接続'));
   const early = harness({ reads: [{ kind: 'absent' }] });
   early.tick(59000);
+  await globals(early);
   await early.plugin.handle(appear('k1'));
   assert.deepEqual(early.launchArgs, [['--background']]);
 });
 test('a timer left from an earlier start does not end a later start early', async () => {
   const h = harness({ reads: [{ kind: 'absent' }, { kind: 'ok', json: SNAP }, { kind: 'absent' }, { kind: 'absent' }, { kind: 'absent' }] });
+  await globals(h);
   await h.plugin.handle(appear('k1'));
   await fire(h, 2000);
   assert.ok(h.images('k1').at(-1).includes('30%'));
@@ -391,4 +399,26 @@ test('polling stops when only いまやってること keys are left', async () 
   await h.plugin.handle(appear('k1')); await h.plugin.handle(appear('n1', NOW));
   await h.plugin.handle({ event: 'willDisappear', context: 'k1' });
   assert.equal(h.timers.intervals[0].cleared, true);
+});
+test('the start when Stream Deck starts waits for the global settings and uses the app path set by hand', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }], resolve: manual => manual || 'C:\\Apps\\AIUsageManager.exe' });
+  await h.plugin.handle(appear('k1'));
+  assert.deepEqual(h.launches, []);
+  await globals(h, 'D:\\Tools\\AIUsageManager.exe');
+  assert.deepEqual(h.launches, ['D:\\Tools\\AIUsageManager.exe']); assert.deepEqual(h.launchArgs, [['--background']]);
+  await globals(h, 'D:\\Tools\\AIUsageManager.exe');
+  assert.equal(h.launches.length, 1);
+});
+test('no start when the tray app is running by the time the global settings arrive', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }, { kind: 'ok', json: SNAP }] });
+  await h.plugin.handle(appear('k1')); await h.plugin.poll();
+  await globals(h);
+  assert.deepEqual(h.launches, []); assert.ok(h.images('k1').at(-1).includes('30%'));
+});
+test('global settings that arrive more than a minute after Stream Deck started do not start the tray app', async () => {
+  const h = harness({ reads: [{ kind: 'absent' }] });
+  await h.plugin.handle(appear('k1'));
+  h.tick(61000);
+  await globals(h);
+  assert.deepEqual(h.launches, []);
 });

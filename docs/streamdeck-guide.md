@@ -133,7 +133,7 @@ Claude Code（デスクトップアプリ・VS Code）とCodex（ChatGPT/Codex�
 - Stream Deckを使っていないときもサインイン時に起動させるには、トレイアプリの右クリック →「Windowsのサインイン時に起動」をオンにします。両方が同時に起動しようとしても、動くトレイアプリは1つだけです。
 - トレイアプリを終了すると、最大で約7秒後に「未接続」になります。
 - 「未接続」のキーを押すと、トレイアプリを起動します。起動を待つ間はすべてのキーに「起動中」と表示し、その間のキー操作は受け付けません。値が出るまで十数秒かかることがあり、最初は「未取得」と表示される場合があります。約10秒たってもトレイアプリが見つからなければ「未接続」に戻ります。Stream Deckアプリを終了しても、起動したトレイアプリは動き続けます。
-- 起動するのは、トレイアプリが前回起動したときに記録した場所（`%LOCALAPPDATA%\AIUsageManager\app-location.json`）のアプリです。設定画面の「トレイアプリの場所」に `AIUsageManager.exe` までの絶対パスを入力した場合は、そちらを優先します。
+- 起動するのは、トレイアプリが前回起動したときに記録した場所（`%LOCALAPPDATA%\AIUsageManager\app-location.json`）のアプリです。設定画面の「トレイアプリの場所」に `AIUsageManager.exe` までの絶対パスを入力した場合は、そちらを優先します。Stream Deckの起動時の自動起動でも同じです。
 - 場所が分からないときは、キーに「アプリの場所を設定」と表示します。トレイアプリを一度手動で起動するか、設定画面で場所を入力してください。Stream Deckの起動時の自動起動では、この表示は出さずに「未接続」のままにします。
 
 ## 必要なもの
@@ -150,7 +150,7 @@ Claude Code（デスクトップアプリ・VS Code）とCodex（ChatGPT/Codex�
    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\package-streamdeck.ps1
    ```
 
-2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.5.0-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
+2. できた `dist\AIUsageManager-<版>-streamdeck.streamDeckPlugin`（例 `AIUsageManager-1.5.1-streamdeck.streamDeckPlugin`）をダブルクリックし、Stream Deckに追加します。
 
    Stream Deckは、すでに入っているものと同じ版番号のファイルを入れ直しても更新しません（ログには「AlreadyInstalled」と記録されます）。プラグインを更新するときは、`streamdeck/manifest.json` の `Version` を上げてから作り直すか、Stream Deckの設定 →「プラグイン」で一度アンインストールしてから入れてください。
 3. 「AI Usage Manager」の一覧から、キーをボタンへ置きます。

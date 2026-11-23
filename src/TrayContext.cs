@@ -46,6 +46,7 @@ namespace AIUsageManager
         readonly ToolStripMenuItem waitingMenu=new ToolStripMenuItem("対応待ちの通知");
         readonly ToolStripMenuItem startupMenu=new ToolStripMenuItem("Windowsのサインイン時に起動");
         readonly IStartupStore startup;
+        readonly Action<string> warnStartup;
         readonly Action<string> waitingNotify;
         WaitingList latestWaiting;
         string waitingSignature="";
@@ -66,9 +67,9 @@ namespace AIUsageManager
             : this(show,signal,source,themeSettings,launcher,loginSignals,null) { }
         internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification)
             : this(show,signal,source,themeSettings,launcher,loginSignals,notification,null,null) { }
-        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null, string nowDoingHotkey=null)
+        internal TrayContext(bool show, EventWaitHandle signal, IUsageSource source, ThemeSettings themeSettings, ILoginLauncher launcher, EventWaitHandle[] loginSignals, Action<string> notification, SnapshotServer snapshotServer, EventWaitHandle refreshSignal, Func<CancellationToken,Task<ProviderStatus[]>> statusSource=null, IWaitingSource waitingSource=null, Action<string> waitingNotification=null, IStartupStore startupStore=null, string nowDoingHotkey=null, Action<string> startupWarning=null)
         {
-            startup=startupStore??(source==null?RegistryStartupStore.Default():null);
+            startup=StartAtSignIn.StoreFor(startupStore,source!=null);
             this.waitingSource=waitingSource??(source==null?new LocalWaitingSource(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)):null);
             statusPages=statusSource??(source==null?(Func<CancellationToken,Task<ProviderStatus[]>>)(token=>StatusPages.FetchAsync(http,token)):null);
             snapshots=snapshotServer;
@@ -83,6 +84,7 @@ namespace AIUsageManager
             notify=notification??(text=>tray.ShowBalloonTip(8000,"AI 使用量の警告",text,ToolTipIcon.Warning));
             tray.BalloonTipClicked+=(s,e)=>ShowPopup();
             waitingNotify=waitingNotification??(text=>tray.ShowBalloonTip(8000,"対応待ち",text,ToolTipIcon.Info));
+            warnStartup=startupWarning??(text=>tray.ShowBalloonTip(8000,"サインイン時の起動",text,ToolTipIcon.Warning));
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
             menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
             foreach(string name in LoginServices) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
@@ -112,7 +114,8 @@ namespace AIUsageManager
             if(startup!=null) {
                 startupMenu.Checked=StartAtSignIn.IsOn(startup,Application.ExecutablePath);
                 startupMenu.Click+=(s,e)=> {
-                    if(!StartAtSignIn.Set(startup,Application.ExecutablePath,!startupMenu.Checked))tray.ShowBalloonTip(4000,"サインイン時の起動","設定を変更できませんでした。",ToolTipIcon.Warning);
+                    string warning=StartAtSignIn.Change(startup,Application.ExecutablePath,!startupMenu.Checked);
+                    if(warning!=null)warnStartup(warning);
                     startupMenu.Checked=StartAtSignIn.IsOn(startup,Application.ExecutablePath);
                 };
                 menu.Items.Add(startupMenu);

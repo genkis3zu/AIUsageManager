@@ -43,6 +43,28 @@ internal static partial class Tests
             store.Fail = true;
             Assert(!StartAtSignIn.Set(store, exe, true) && !StartAtSignIn.Set(store, exe, false));
         });
+        Check("An entry longer than Windows reads from the Run key (260 characters) is not written, and the tray says why", () => {
+            string fits = @"C:\" + new string('a', 238) + ".exe", tooLong = @"C:\" + new string('a', 239) + ".exe";
+            Assert(StartAtSignIn.MaxCommandLength == 260);
+            Assert(StartAtSignIn.Command(fits).Length == 260 && StartAtSignIn.Fits(fits));
+            Assert(StartAtSignIn.Command(tooLong).Length == 261 && !StartAtSignIn.Fits(tooLong));
+            var store = new FakeStartup();
+            Assert(!StartAtSignIn.Set(store, tooLong, true) && store.Value == null);
+            Assert(StartAtSignIn.Change(store, tooLong, true) == StartAtSignIn.TooLong && store.Value == null);
+            Assert(StartAtSignIn.Change(store, fits, true) == null && store.Value == StartAtSignIn.Command(fits));
+            // Turning it off always works, also for an entry a long path left behind.
+            store.Value = StartAtSignIn.Command(tooLong);
+            Assert(StartAtSignIn.Change(store, tooLong, false) == null && store.Value == null);
+            store.Fail = true;
+            Assert(StartAtSignIn.Change(store, fits, true) == StartAtSignIn.CouldNotChange);
+            Assert(StartAtSignIn.Change(store, fits, false) == StartAtSignIn.CouldNotChange);
+        });
+        Check("The tray uses the real registry entry only when it runs for real", () => {
+            var real = StartAtSignIn.StoreFor(null, false) as RegistryStartupStore;
+            Assert(real != null && real.KeyPath == RegistryStartupStore.RunKey && real.ApprovedKeyPath == RegistryStartupStore.ApprovedKey && real.Name == RegistryStartupStore.ValueName);
+            var given = new FakeStartup();
+            Assert(StartAtSignIn.StoreFor(given, false) == given && StartAtSignIn.StoreFor(given, true) == given && StartAtSignIn.StoreFor(null, true) == null);
+        });
         Check("The sign-in entry goes to the current user's Run key; Windows keeps its on/off flag beside it", () => {
             Assert(RegistryStartupStore.RunKey == @"Software\Microsoft\Windows\CurrentVersion\Run" && RegistryStartupStore.ValueName == "AIUsageManager");
             Assert(RegistryStartupStore.ApprovedKey == @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run");
