@@ -47,8 +47,73 @@ internal static partial class Tests
         return Rec("{'timestamp':'" + Stamp(at) + "','type':'event_msg','payload':{'type':'task_complete','last_agent_message':'" + message + "','started_at':" + started.ToUnixTimeSeconds() + ",'completed_at':" + at.ToUnixTimeSeconds() + ",'duration_ms':" + durationMs + "}}");
     }
 
+    static AiTurn Turn(DateTimeOffset start, DateTimeOffset end, double workMs, string reply, params string[] requests)
+    {
+        var turn = new AiTurn { Start = start, End = end, ByUser = true, Reply = reply, WorkMs = workMs };
+        turn.Requests.AddRange(requests);
+        return turn;
+    }
+    static AiStretch Stretch(string service, string place, string project, params AiTurn[] turns)
+    {
+        var stretch = new AiStretch { Key = service + "/s", Service = service, Place = place, Project = project, Cwd = @"C:\app" };
+        stretch.Turns.AddRange(turns);
+        return stretch;
+    }
+    static List<string> Details(List<string> entry) { return entry.Skip(3).Where(l => l != ">").ToList(); }
+
     static void RunAiDoneDetailTests()
     {
+        Check("Copied text cannot become tags, links, embeds or headings", () => {
+            Assert(AiDoneText.Clean("## 直し #tag [[A|B]] [[C]] ![[D.png]] **太字** `x`") == "直し ＃tag B C 太字 x");
+            Assert(AiDoneText.Clean("一\r\n二\t三") == "一 二 三");
+            string hundred = new string('あ', 100);
+            Assert(AiDoneText.Clean(hundred) == hundred && AiDoneText.Clean(hundred + "い") == hundred + "…");
+            string emoji = new string('あ', 99) + "😀";
+            Assert(AiDoneText.Clean(emoji + "い") == new string('あ', 99) + "…");
+            Assert(AiDoneText.Clean(null) == "" && AiDoneText.Clean("  ") == "");
+            // Written after "> - ", a leading [ ] would become a task in the diary.
+            Assert(AiDoneText.Clean("[ ] やること") == "やること" && AiDoneText.Clean("[x] 済み") == "済み");
+            Assert(AiDoneText.ReplyLines("- [ ] 確かめる", 3).SequenceEqual(new[] { "確かめる" }));
+        });
+        Check("The first lines of a reply skip blank lines, headings, code, tables and rules", () => {
+            string reply = "## まとめ\n\n- 表を直しました\n```\ncode\n```\n| a | b |\n---\n1. テストが通りました\n> 注意: なし\n4行目";
+            Assert(AiDoneText.ReplyLines(reply, 3).SequenceEqual(new[] { "表を直しました", "テストが通りました", "注意: なし" }));
+            Assert(AiDoneText.ReplyLines(reply, 5).SequenceEqual(new[] { "表を直しました", "テストが通りました", "注意: なし", "4行目" }));
+            Assert(AiDoneText.ReplyLines(null, 3).Count == 0 && AiDoneText.ReplyLines("```\n# x\n```", 3).Count == 0);
+        });
+        Check("An entry has the time range, the title and the details", () => {
+            AiStretch stretch = Stretch("Claude", "表の直し", "App", Turn(At(10, 0), At(10, 15), 9 * 60000, "返事1\n返事2", "一つ目", "二つ目"));
+            List<string> entry = AiDoneFormat.Entry(stretch, new[] { "abc1234 一つ目", "def5678 二つ目" }, false);
+            Assert(entry.SequenceEqual(new[] {
+                "[10:00-10:15]", "🤖 **Claude Code: 表の直し**（App・作業 9分）", "> [!info]- 詳細",
+                "> **🗣️ 頼んだこと:**", "> - 一つ目", "> - 二つ目", ">",
+                "> **🤖 Claude の処理・出力:**", "> - 返事1", "> - 返事2",
+                "> - 📦 成果物: コミット 2件（`abc1234` 一つ目 ／ `def5678` 二つ目）",
+            }));
+        });
+        Check("Entry details: same minute, same name, under a minute, more requests, more commits, no commits", () => {
+            List<string> entry = AiDoneFormat.Entry(Stretch("Claude", "表の直し", "App", Turn(At(10, 0, 5), At(10, 0, 50), 30000, "済み", "直して")), new string[0], false);
+            Assert(entry[0] == "[10:00]" && entry[1] == "🤖 **Claude Code: 表の直し**（App・作業 1分未満）");
+            Assert(!entry.Any(l => l.Contains("📦")));
+            entry = AiDoneFormat.Entry(Stretch("Claude", "App", "App", Turn(At(10, 0), At(10, 9), 9 * 60000, "済み", "直して")), new string[0], false);
+            Assert(entry[1] == "🤖 **Claude Code: App**（作業 9分）");
+            AiStretch two = Stretch("Codex", "Web", "Web",
+                Turn(At(10, 0), At(10, 5), 5 * 60000, "前の返事", "一つ目\n続きの行", "二つ目"),
+                Turn(At(10, 20), At(10, 24), 4 * 60000, "最後の返事", "三つ目", "四つ目", "五つ目"));
+            entry = AiDoneFormat.Entry(two, new[] { "1111111 a", "2222222 b", "3333333 c", "4444444 d", "5555555 e" }, true);
+            Assert(entry[0] == "[10:00-10:24]" && entry[1] == "🤖 **Codex: Web**（作業 9分）");
+            Assert(entry.Contains("> - 一つ目") && entry.Contains("> - 三つ目（ほか 2件）") && !entry.Any(l => l.Contains("四つ目") || l.Contains("続きの行")));
+            Assert(entry.Contains("> **🤖 Codex の処理・出力:**") && entry.Contains("> - 最後の返事") && !entry.Any(l => l.Contains("前の返事")));
+            // git log stops at six, so only "six or more" is known.
+            Assert(entry.Contains("> - 📦 成果物: コミット 6件以上（`1111111` a ／ `2222222` b ／ `3333333` c ／ `4444444` d ／ `5555555` e ／ ほか）"));
+        });
+        Check("Entry details are at most eight lines, cutting the reply first", () => {
+            List<string> entry = AiDoneFormat.Entry(Stretch("Claude", "N", "P", Turn(At(10, 0), At(10, 9), 9 * 60000, "返事1\n返事2\n返事3", "一", "二", "三")), new[] { "abc1234 直し" }, false);
+            Assert(Details(entry).Count == 8 && entry.Contains("> - 返事2") && !entry.Contains("> - 返事3"));
+            entry = AiDoneFormat.Entry(Stretch("Claude", "N", "P", Turn(At(10, 0), At(10, 9), 9 * 60000, "返事1\n返事2\n返事3")), new string[0], false);
+            Assert(!entry.Any(l => l.Contains("頼んだこと")) && !entry.Contains(">") && entry.Contains("> - 返事3"));
+            Assert(entry[2] == "> [!info]- 詳細" && entry[3] == "> **🤖 Claude の処理・出力:**");
+        });
         Check("Claude Code turns: the user's requests, the last reply, and the end", () => {
             List<AiTurn> turns = ClaudeTurns(Claude1(), At(9, 0));
             Assert(turns.Count == 3);
