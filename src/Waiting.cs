@@ -196,6 +196,9 @@ namespace AIUsageManager
         public string Id, Cwd, Originator, Source;
         public CodexState State;
         public DateTimeOffset? Since;
+        // The thread's record file, for the AI done detail; and whether Codex started the thread itself (a helper, such as a review).
+        public string Path;
+        public bool Helper;
     }
     public static class CodexSessions
     {
@@ -213,6 +216,8 @@ namespace AIUsageManager
                 var payload = Json.Obj(meta, "payload");
                 thread.Id = Json.Str(payload, "id"); thread.Cwd = Json.Str(payload, "cwd");
                 thread.Originator = Json.Str(payload, "originator"); thread.Source = Json.Str(payload, "source");
+                var source = Json.Obj(payload, "source");
+                thread.Helper = source != null && source.ContainsKey("subagent");
             }
             var answered = new HashSet<string>(); int seen = 0;
             foreach (string line in linesNewestFirst ?? new string[0])
@@ -261,7 +266,7 @@ namespace AIUsageManager
                     if (entry.Changed < oldest) continue;
                     if (entry.Thread == null)
                     {
-                        try { entry.Thread = Classify(FirstLine(file.FullName), ReadOnlyFiles.ReverseLines(file.FullName)); }
+                        try { entry.Thread = Classify(FirstLine(file.FullName), ReadOnlyFiles.ReverseLines(file.FullName)); entry.Thread.Path = file.FullName; }
                         catch (IOException) { continue; }
                         catch (UnauthorizedAccessException) { continue; }
                     }
@@ -304,6 +309,9 @@ namespace AIUsageManager
         public string Key, Service, Place, App;
         // The session's working folder, for leaving out work in some folders from the 日中ログ; not shared with other apps.
         public string Cwd;
+        // The Codex record file (null for Claude Code) and whether Codex started the thread itself; for the AI done lines.
+        public string RecordPath;
+        public bool Helper;
         public WaitReason Reason;
         public DateTimeOffset Since;
     }
@@ -330,14 +338,14 @@ namespace AIUsageManager
                 string key = "Claude/" + session.SessionId, state = session.Status == "waiting" ? "waiting" : session.Status == "busy" ? "busy" : session.Status == "idle" ? "idle" : "other";
                 present.Add(key);
                 var reason = state == "waiting" ? (session.WaitingFor == "input needed" ? WaitReason.Question : WaitReason.Confirm) : WaitReason.Finished;
-                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), session.Cwd, WaitingNames.ClaudeApp(session.Entrypoint, session.Parents), reason, session.StatusUpdatedAt, now);
+                Add(items, key, state, "busy", "Claude", WaitingNames.Place(session.Name, session.Cwd), session.Cwd, WaitingNames.ClaudeApp(session.Entrypoint, session.Parents), reason, session.StatusUpdatedAt, now, null, false);
             }
             foreach (var thread in codex ?? new CodexThread[0])
             {
                 if (thread == null) continue;
                 string key = "Codex/" + (thread.Id ?? thread.Cwd ?? ""), state = thread.State == CodexState.Question ? "waiting" : thread.State == CodexState.Finished ? "idle" : thread.State == CodexState.Working ? "busy" : "other";
                 present.Add(key);
-                Add(items, key, state, "busy", "Codex", WaitingNames.Place(null, thread.Cwd), thread.Cwd, CodexSessions.App(thread), WaitReason.Question, thread.Since, now);
+                Add(items, key, state, "busy", "Codex", WaitingNames.Place(null, thread.Cwd), thread.Cwd, CodexSessions.App(thread), WaitReason.Question, thread.Since, now, thread.Path, thread.Helper);
             }
             foreach (var gone in lastState.Keys.Where(k => !present.Contains(k)).ToArray()) { lastState.Remove(gone); finished.Remove(gone); firstSeen.Remove(gone); }
             var unreadable = new List<WaitingUnreadable>();
@@ -347,7 +355,7 @@ namespace AIUsageManager
             var done = items.Where(i => i.Reason == WaitReason.Finished).OrderByDescending(i => i.Since);
             return new WaitingList { Items = waits.Concat(done).ToArray(), Unreadable = unreadable.ToArray() };
         }
-        void Add(List<WaitingItem> items, string key, string state, string working, string service, string place, string cwd, string app, WaitReason waitReason, DateTimeOffset? at, DateTimeOffset now)
+        void Add(List<WaitingItem> items, string key, string state, string working, string service, string place, string cwd, string app, WaitReason waitReason, DateTimeOffset? at, DateTimeOffset now, string recordPath, bool helper)
         {
             string previous; lastState.TryGetValue(key, out previous); lastState[key] = state;
             if (state != "waiting") firstSeen.Remove(key);
@@ -356,7 +364,7 @@ namespace AIUsageManager
                 finished.Remove(key);
                 DateTimeOffset seen;
                 if (!firstSeen.TryGetValue(key, out seen)) { seen = now; firstSeen[key] = now; }
-                items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, Reason = waitReason, Since = Clamp(at ?? seen, now) });
+                items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, RecordPath = recordPath, Helper = helper, Reason = waitReason, Since = Clamp(at ?? seen, now) });
                 return;
             }
             if (state != "idle") { finished.Remove(key); return; }
@@ -366,7 +374,7 @@ namespace AIUsageManager
                 if (previous != working && previous != "waiting") return;
                 since = Clamp(at ?? now, now); finished[key] = since;
             }
-            if (now - since <= FinishedFor) items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, Reason = WaitReason.Finished, Since = since });
+            if (now - since <= FinishedFor) items.Add(new WaitingItem { Key = key, Service = service, Place = place, Cwd = cwd, App = app, RecordPath = recordPath, Helper = helper, Reason = WaitReason.Finished, Since = since });
         }
         static DateTimeOffset Clamp(DateTimeOffset at, DateTimeOffset now) { return at > now ? now : at; }
     }

@@ -298,6 +298,10 @@ internal static partial class Tests
             Assert(NowDoingButton.Parse(1, "🗒️ 議事の記録をする|text:x").ShortLabel == "🗒️ 議事の記録を");
             Assert(NowDoingButton.Parse(1, "作業|text:x").ShortLabel == "作業");
         });
+        Check("now_doing_ai_done_detail=on is read", () => {
+            Assert(NowDoingSettings.Parse("now_doing_ai_done_detail=on\n").AiDoneDetail);
+            Assert(!NowDoingSettings.Parse("").AiDoneDetail && !NowDoingSettings.Parse("now_doing_ai_done_detail=yes\n").AiDoneDetail);
+        });
         Check("Script settings and the AI done keys are read", () => {
             var s = NowDoingSettings.Parse("now_doing_after=python -X utf8 scripts\\now_doing\\after.py\nnow_doing_list=python list.py\nnow_doing_workdir=D:\\Vault\nnow_doing_ai_done=on\nnow_doing_ai_done_exclude= D:\\a; D:\\b ;\n");
             Assert(s.After == "python -X utf8 scripts\\now_doing\\after.py" && s.List == "python list.py" && s.Workdir == "D:\\Vault");

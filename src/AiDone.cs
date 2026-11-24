@@ -36,7 +36,7 @@ namespace AIUsageManager
         {
             foreach (WaitingItem item in items ?? new WaitingItem[0])
             {
-                if (item == null || item.Reason != WaitReason.Finished) continue;
+                if (item == null || item.Reason != WaitReason.Finished || item.Helper) continue;
                 string finish = item.Key + "|" + item.Since.UtcTicks;
                 if (seen.ContainsKey(finish)) continue;
                 seen[finish] = now;

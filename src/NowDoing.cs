@@ -30,6 +30,8 @@ namespace AIUsageManager
         // now_doing_ai_done=on: the tray app writes finished AI work to the 日中ログ, except work in these folders.
         public bool AiDone;
         public string[] AiDoneExclude = new string[0];
+        // now_doing_ai_done_detail=on: each entry also says what was asked, what came back and the commits made (read from the local records).
+        public bool AiDoneDetail;
 
         public static NowDoingSettings Parse(string ini)
         {
@@ -62,6 +64,7 @@ namespace AIUsageManager
                 else if (key == "now_doing_list") settings.List = value;
                 else if (key == "now_doing_workdir") settings.Workdir = value;
                 else if (key == "now_doing_ai_done") settings.AiDone = value == "on";
+                else if (key == "now_doing_ai_done_detail") settings.AiDoneDetail = value == "on";
                 else if (key == "now_doing_ai_done_exclude")
                     settings.AiDoneExclude = value.Split(';').Select(p => p.Trim()).Where(p => p.Length > 0).ToArray();
             }

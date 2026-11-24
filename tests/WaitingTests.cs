@@ -36,6 +36,25 @@ internal static partial class Tests
     { return new CodexThread { Id = id, State = state, Since = at, Cwd = @"C:\src\web-app", Source = "vscode" }; }
     static void RunWaitingTests()
     {
+        Check("Codex helper threads are told apart from the user's threads", () => {
+            var helper = Classify(CodexMeta("{'subagent':{'other':'guardian'}}"), CodexEvent("01", "task_started"));
+            Assert(helper.Helper && helper.Source == null);
+            var own = Classify(CodexMeta("'vscode'"), CodexEvent("01", "task_started"));
+            Assert(!own.Helper && own.Source == "vscode");
+        });
+        Check("The waiting list keeps the Codex record file and whether it is a helper", () => {
+            var tracker = new WaitingTracker();
+            var thread = new CodexThread { Id = "h", Cwd = @"C:\src\x", State = CodexState.Working, Path = @"C:\c\rollout-h.jsonl", Helper = true };
+            tracker.Observe(new ClaudeSession[0], true, new[] { thread }, true, T);
+            thread.State = CodexState.Finished; thread.Since = T.AddMinutes(1);
+            WaitingList list = tracker.Observe(new ClaudeSession[0], true, new[] { thread }, true, T.AddMinutes(2));
+            Assert(list.Items.Length == 1 && list.Items[0].RecordPath == @"C:\c\rollout-h.jsonl" && list.Items[0].Helper);
+            var claude = new ClaudeSession { Pid = 1, SessionId = "s", Status = "busy", Cwd = @"C:\src\y" };
+            tracker.Observe(new[] { claude }, true, new CodexThread[0], true, T);
+            claude.Status = "idle"; claude.StatusUpdatedAt = T.AddMinutes(1);
+            list = tracker.Observe(new[] { claude }, true, new CodexThread[0], true, T.AddMinutes(2));
+            Assert(list.Items.Length == 1 && list.Items[0].RecordPath == null && !list.Items[0].Helper);
+        });
         Check("Claude session files give status, reason and start time", () => {
             var s = ClaudeSessions.Parse(J("{'pid':12,'sessionId':'s1','status':'waiting','waitingFor':'input needed','statusUpdatedAt':1763600000000,'cwd':'C:\\\\src\\\\Proj','name':'Fix login','entrypoint':'claude-desktop'}"));
             Assert(s != null && s.Pid == 12 && s.SessionId == "s1" && s.Status == "waiting" && s.WaitingFor == "input needed");

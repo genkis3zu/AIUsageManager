@@ -58,6 +58,13 @@ internal static partial class Tests
             log.Observe(new[] { Finished("Claude/a", "Claude", "A", null, At(10, 31)) }, At(10, 31, 5));
             Assert(log.Due(At(10, 34, 0)).Time == new DateTime(2026, 11, 24, 10, 31, 0));
         });
+        Check("AI done lines skip Codex helper threads", () => {
+            var log = new AiDoneLog(new string[0]);
+            WaitingItem helper = Finished("Codex/h", "Codex", "P", @"C:\p", At(10, 0));
+            helper.Helper = true;
+            log.Observe(new[] { helper }, At(10, 0, 5));
+            Assert(log.Due(At(10, 9, 0)) == null);
+        });
         Check("Waits and questions are not written", () => {
             var log = new AiDoneLog(new string[0]);
             log.Observe(new[] { Finished("Claude/q", "Claude", "Q", null, At(10, 0), WaitReason.Question), Finished("Claude/c", "Claude", "C", null, At(10, 0), WaitReason.Confirm), null }, At(10, 0, 5));
