@@ -61,8 +61,60 @@ internal static partial class Tests
     }
     static List<string> Details(List<string> entry) { return entry.Skip(3).Where(l => l != ">").ToList(); }
 
+    // A throwaway Git repository for the commit tests; its name and e-mail are set in it only.
+    static void RunGit(string folder, DateTimeOffset? at, params string[] arguments)
+    {
+        var info = new System.Diagnostics.ProcessStartInfo("git", string.Join(" ", arguments.Select(a => "\"" + a + "\"")))
+        { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = folder, RedirectStandardOutput = true, RedirectStandardError = true };
+        if (at.HasValue) { info.EnvironmentVariables["GIT_COMMITTER_DATE"] = at.Value.ToString("yyyy-MM-ddTHH:mm:sszzz"); info.EnvironmentVariables["GIT_AUTHOR_DATE"] = at.Value.ToString("yyyy-MM-ddTHH:mm:sszzz"); }
+        using (var process = System.Diagnostics.Process.Start(info))
+        {
+            process.StandardOutput.ReadToEnd(); process.StandardError.ReadToEnd(); process.WaitForExit();
+            if (process.ExitCode != 0) throw new Exception("git " + arguments[0] + " failed");
+        }
+    }
+    static string TempFolder()
+    {
+        string folder = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "aiusage-test-" + Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(folder);
+        return folder;
+    }
+    static void RemoveFolder(string folder)
+    {
+        // Git writes its objects read-only.
+        foreach (string file in System.IO.Directory.GetFiles(folder, "*", System.IO.SearchOption.AllDirectories)) System.IO.File.SetAttributes(file, System.IO.FileAttributes.Normal);
+        System.IO.Directory.Delete(folder, true);
+    }
+
     static void RunAiDoneDetailTests()
     {
+        Check("Commits made in the folder during the work are found", () => {
+            string folder = TempFolder();
+            try
+            {
+                RunGit(folder, null, "init", "-q");
+                RunGit(folder, null, "config", "user.name", "Test");
+                RunGit(folder, null, "config", "user.email", "test@example.invalid");
+                RunGit(folder, null, "config", "commit.gpgsign", "false");
+                foreach (var at in new[] { At(9, 0), At(10, 5), At(10, 10), At(11, 0) })
+                    RunGit(folder, at, "commit", "-q", "--allow-empty", "-m", "made at " + at.ToString("HH:mm"));
+                List<string> commits = GitCommits.Between(folder, At(10, 0), At(10, 30));
+                Assert(commits.Count == 2 && commits[0].EndsWith(" made at 10:10") && commits[1].EndsWith(" made at 10:05"));
+                Assert(commits.All(c => System.Text.RegularExpressions.Regex.IsMatch(c, "^[0-9a-f]{7,} .+$")));
+                // A folder inside the repository is in Git too.
+                string inner = System.IO.Path.Combine(folder, "src");
+                System.IO.Directory.CreateDirectory(inner);
+                Assert(GitCommits.Between(inner, At(10, 0), At(10, 30)).Count == 2);
+            }
+            finally { RemoveFolder(folder); }
+        });
+        Check("A folder that is not in Git gives no commits", () => {
+            string folder = TempFolder();
+            try { Assert(GitCommits.Between(folder, At(10, 0), At(10, 30)).Count == 0); }
+            finally { RemoveFolder(folder); }
+            Assert(GitCommits.Between(folder, At(10, 0), At(10, 30)).Count == 0);
+            Assert(GitCommits.Between(null, At(10, 0), At(10, 30)).Count == 0 && GitCommits.Between("", At(10, 0), At(10, 30)).Count == 0);
+        });
         Check("Copied text cannot become tags, links, embeds or headings", () => {
             Assert(AiDoneText.Clean("## 直し #tag [[A|B]] [[C]] ![[D.png]] **太字** `x`") == "直し ＃tag B C 太字 x");
             Assert(AiDoneText.Clean("一\r\n二\t三") == "一 二 三");

@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Security;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 
 namespace AIUsageManager
 {
@@ -52,6 +55,46 @@ namespace AIUsageManager
         public static string FirstLine(string text)
         {
             return (text ?? "").Replace("\r", "").Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0) ?? "";
+        }
+    }
+
+    // The commits made in the working folder's repository during a piece of work: "<short hash> <subject>", newest first,
+    // at most six (the diary shows five and "ほか" for the sixth). Nothing when the folder is not in Git, git is not
+    // installed, or git fails or takes more than 5 seconds. git runs without a shell and without a window.
+    internal static class GitCommits
+    {
+        static readonly NowDoingScriptLimits Limits = new NowDoingScriptLimits { TimeoutMs = 5000, MaxBytes = 16384, MaxLines = 10 };
+        public static List<string> Between(string cwd, DateTimeOffset start, DateTimeOffset end)
+        {
+            var none = new List<string>();
+            if (!InGit(cwd)) return none;
+            var arguments = new[] { "-C", cwd, "log", "--since=" + GitDate(start), "--until=" + GitDate(end), "--format=%h %s", "-n", "6" };
+            NowDoingScriptResult result;
+            try { result = NowDoingScript.RunAsync("git", arguments, cwd, Limits, CancellationToken.None).Result; }
+            catch (AggregateException) { return none; }
+            if (!result.Ok) return none;
+            return result.Output.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Take(6).ToList();
+        }
+        static string GitDate(DateTimeOffset at) { return at.ToString("yyyy-MM-dd'T'HH:mm:sszzz", CultureInfo.InvariantCulture); }
+        // The folder or one above it has .git (a folder, or a file in a worktree).
+        static bool InGit(string cwd)
+        {
+            if (string.IsNullOrEmpty(cwd)) return false;
+            try
+            {
+                for (var folder = new DirectoryInfo(cwd); folder != null; folder = folder.Parent)
+                {
+                    if (!folder.Exists) return false;
+                    string git = Path.Combine(folder.FullName, ".git");
+                    if (Directory.Exists(git) || File.Exists(git)) return true;
+                }
+            }
+            catch (ArgumentException) { }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (SecurityException) { }
+            catch (NotSupportedException) { }
+            return false;
         }
     }
 
