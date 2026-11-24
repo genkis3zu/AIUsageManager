@@ -98,6 +98,117 @@ namespace AIUsageManager
         }
     }
 
+    // Decides when finished AI work goes to the diary (now_doing_ai_done_detail=on). Each finished session or thread on
+    // the waiting list is read from its record at most once a minute. Only the user's own turns count. The user's turns
+    // with ten minutes or less between them are one piece of work, written ten minutes after the last one ended.
+    internal sealed class AiDoneDetailLog
+    {
+        public static readonly TimeSpan Quiet = TimeSpan.FromMinutes(10);
+        static readonly TimeSpan ReadEvery = TimeSpan.FromMinutes(1);
+        sealed class Pending { public WaitingItem Item; public DateTimeOffset? LastRead; }
+        readonly object gate = new object();
+        readonly string[] exclude;
+        readonly DateTimeOffset since;
+        readonly Func<WaitingItem, DateTimeOffset, List<AiTurn>> readTurns;
+        readonly Dictionary<string, Pending> pending = new Dictionary<string, Pending>();
+        // Per session: the end of the last turn read when its work was written, and the finish already dealt with.
+        readonly Dictionary<string, DateTimeOffset> writtenEnd = new Dictionary<string, DateTimeOffset>();
+        readonly Dictionary<string, DateTimeOffset> handled = new Dictionary<string, DateTimeOffset>();
+
+        // `since`: work that ended before this (the app's start) is not written.
+        public AiDoneDetailLog(string[] exclude, DateTimeOffset since, Func<WaitingItem, DateTimeOffset, List<AiTurn>> readTurns)
+        {
+            this.exclude = exclude ?? new string[0]; this.since = since; this.readTurns = readTurns;
+        }
+
+        public void Observe(WaitingItem[] items, DateTimeOffset now)
+        {
+            lock (gate)
+                foreach (var item in items ?? new WaitingItem[0])
+                {
+                    if (item == null || item.Reason != WaitReason.Finished || item.Helper || string.IsNullOrEmpty(item.Key) || AiDoneLog.Excluded(item.Cwd, exclude)) continue;
+                    DateTimeOffset done;
+                    if (handled.TryGetValue(item.Key, out done) && item.Since <= done) continue;
+                    Pending entry;
+                    if (!pending.TryGetValue(item.Key, out entry)) pending[item.Key] = entry = new Pending();
+                    entry.Item = item;
+                }
+        }
+
+        public List<AiStretch> Due(DateTimeOffset now)
+        {
+            var result = new List<AiStretch>();
+            lock (gate)
+                foreach (string key in pending.Keys.ToList())
+                {
+                    Pending entry = pending[key];
+                    if (entry.LastRead.HasValue && now - entry.LastRead.Value < ReadEvery) continue;
+                    entry.LastRead = now;
+                    List<AiTurn> turns = Read(entry.Item);
+                    if (turns == null) continue;
+                    var mine = turns.Where(t => t.ByUser).ToList();
+                    if (mine.Any(t => t.End == null)) continue;
+                    if (mine.Count > 0 && now - mine.Max(t => t.End.Value) < Quiet) continue;
+                    result.AddRange(Finish(key, entry, turns, mine));
+                }
+            return result;
+        }
+
+        // When the app ends: all waiting work at once, from the turns that have ended, without waiting ten minutes.
+        public List<AiStretch> All()
+        {
+            var result = new List<AiStretch>();
+            lock (gate)
+                foreach (string key in pending.Keys.ToList())
+                {
+                    Pending entry = pending[key];
+                    List<AiTurn> turns = Read(entry.Item);
+                    if (turns == null) continue;
+                    result.AddRange(Finish(key, entry, turns, turns.Where(t => t.ByUser && t.End != null).ToList()));
+                }
+            return result;
+        }
+
+        // The turns that ended after the last written work, or null when the record cannot be read this time.
+        // Claude Code writes no reply after the user stops a turn (Esc), so a turn without an end that started before the
+        // waiting list saw the session finish is taken to have ended then.
+        List<AiTurn> Read(WaitingItem item)
+        {
+            DateTimeOffset after;
+            if (!writtenEnd.TryGetValue(item.Key, out after)) after = since;
+            List<AiTurn> turns;
+            try { turns = readTurns(item, after) ?? new List<AiTurn>(); }
+            catch (Exception) { return null; }
+            return turns.Where(t => t != null).Select(t => t.End == null && t.Start < item.Since
+                ? new AiTurn { Start = t.Start, End = item.Since, ByUser = t.ByUser, Requests = t.Requests, Reply = t.Reply, WorkMs = (item.Since - t.Start).TotalMilliseconds }
+                : t).ToList();
+        }
+
+        List<AiStretch> Finish(string key, Pending entry, List<AiTurn> turns, List<AiTurn> mine)
+        {
+            DateTimeOffset end;
+            if (!writtenEnd.TryGetValue(key, out end)) end = since;
+            foreach (var turn in turns) if (turn.End.HasValue && turn.End.Value > end) end = turn.End.Value;
+            writtenEnd[key] = end;
+            handled[key] = entry.Item.Since;
+            pending.Remove(key);
+            var stretches = new List<AiStretch>();
+            AiStretch current = null; DateTimeOffset last = DateTimeOffset.MinValue;
+            foreach (var turn in mine.OrderBy(t => t.Start))
+            {
+                if (current == null || turn.Start - last > Quiet)
+                {
+                    WaitingItem item = entry.Item;
+                    current = new AiStretch { Key = key, Service = item.Service, Place = item.Place, Cwd = item.Cwd, Project = WaitingNames.Place(null, item.Cwd) };
+                    stretches.Add(current);
+                }
+                current.Turns.Add(turn);
+                if (turn.End.Value > last) last = turn.End.Value;
+            }
+            return stretches;
+        }
+    }
+
     // The user's turns in one session or thread that follow each other (the next request within 10 minutes).
     internal sealed class AiStretch
     {

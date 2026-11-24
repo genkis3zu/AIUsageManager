@@ -61,6 +61,23 @@ internal static partial class Tests
     }
     static List<string> Details(List<string> entry) { return entry.Skip(3).Where(l => l != ">").ToList(); }
 
+    static WaitingItem DoneItem(string key, DateTimeOffset since, string cwd = @"C:\src\app")
+    {
+        return new WaitingItem { Key = key, Service = "Claude", Place = "表の直し", Cwd = cwd, Reason = WaitReason.Finished, Since = since };
+    }
+    static AiTurn Ran(DateTimeOffset start, DateTimeOffset? end, bool byUser = true)
+    {
+        return new AiTurn { Start = start, End = end, ByUser = byUser, WorkMs = end.HasValue ? (end.Value - start).TotalMilliseconds : 0 };
+    }
+    // A stand-in for reading the records: the given turns that ended after `after`, counting the reads.
+    sealed class FakeRecords
+    {
+        public List<AiTurn> Turns = new List<AiTurn>();
+        public int Reads;
+        public List<AiTurn> Read(WaitingItem item, DateTimeOffset after) { Reads++; return Turns.Where(t => t.End == null || t.End.Value > after).ToList(); }
+    }
+    static AiDoneDetailLog DetailLog(FakeRecords records, params string[] exclude) { return new AiDoneDetailLog(exclude, At(9, 0), records.Read); }
+
     // A throwaway Git repository for the commit tests; its name and e-mail are set in it only.
     static void RunGit(string folder, DateTimeOffset? at, params string[] arguments)
     {
@@ -88,6 +105,104 @@ internal static partial class Tests
 
     static void RunAiDoneDetailTests()
     {
+        Check("A piece of work is written ten minutes after the user's last turn ended", () => {
+            var records = new FakeRecords(); records.Turns.Add(Ran(At(10, 0), At(10, 5)));
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5, 10));
+            Assert(log.Due(At(10, 14)).Count == 0);
+            List<AiStretch> due = log.Due(At(10, 15));
+            Assert(due.Count == 1 && due[0].Start == At(10, 0) && due[0].End == At(10, 5) && due[0].Key == "Claude/a");
+            Assert(due[0].Service == "Claude" && due[0].Place == "表の直し" && due[0].Cwd == @"C:\src\app" && due[0].Project == WaitingNames.Place(null, @"C:\src\app"));
+            Assert(log.Due(At(10, 16)).Count == 0);
+            // The same finished session, still on the waiting list, is not read again.
+            int reads = records.Reads;
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 17));
+            Assert(log.Due(At(10, 30)).Count == 0 && records.Reads == reads);
+        });
+        Check("Work that ended before the app started is not written", () => {
+            var records = new FakeRecords(); records.Turns.Add(Ran(At(8, 0), At(8, 30)));
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(9, 5)) }, At(9, 5));
+            Assert(log.Due(At(9, 30)).Count == 0);
+        });
+        Check("Turns ten minutes apart or closer are one piece of work; farther apart are two", () => {
+            var records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), Ran(At(10, 15), At(10, 20)) });
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 20)) }, At(10, 20));
+            List<AiStretch> due = log.Due(At(10, 30));
+            Assert(due.Count == 1 && due[0].Turns.Count == 2 && due[0].Start == At(10, 0) && due[0].End == At(10, 20));
+            records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), Ran(At(10, 16), At(10, 20)) });
+            log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 20)) }, At(10, 20));
+            due = log.Due(At(10, 30));
+            Assert(due.Count == 2 && due[0].End == At(10, 5) && due[1].Start == At(10, 16));
+        });
+        Check("Turns the AI started by itself neither count nor keep the work going", () => {
+            var records = new FakeRecords();
+            records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), Ran(At(10, 12), At(10, 13), false), Ran(At(10, 22), null, false) });
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            List<AiStretch> due = log.Due(At(10, 15));
+            Assert(due.Count == 1 && due[0].Turns.Count == 1 && due[0].End == At(10, 5));
+            records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(10, 12), At(10, 13), false) });
+            log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 13)) }, At(10, 13));
+            Assert(log.Due(At(10, 30)).Count == 0 && log.Due(At(10, 40)).Count == 0 && records.Reads == 1);
+        });
+        Check("A long turn asked within ten minutes keeps the work open", () => {
+            var records = new FakeRecords(); AiTurn second = Ran(At(10, 10), null);
+            records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), second });
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            Assert(log.Due(At(10, 30)).Count == 0);
+            second.End = At(10, 40); second.WorkMs = 30 * 60000;
+            List<AiStretch> due = log.Due(At(10, 50));
+            Assert(due.Count == 1 && due[0].Start == At(10, 0) && due[0].End == At(10, 40));
+        });
+        Check("A turn stopped with Esc ends when the waiting list saw the session finish", () => {
+            // Claude Code writes no reply after an interrupt, so the record alone never shows the end.
+            var records = new FakeRecords(); records.Turns.Add(Ran(At(10, 0), null));
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 3)) }, At(10, 3));
+            Assert(log.Due(At(10, 12)).Count == 0);
+            List<AiStretch> due = log.Due(At(10, 13));
+            Assert(due.Count == 1 && due[0].End == At(10, 3) && due[0].WorkMs == 3 * 60000 && records.Turns[0].End == null);
+        });
+        Check("Helper threads and excluded folders are never read", () => {
+            var records = new FakeRecords(); records.Turns.Add(Ran(At(10, 0), At(10, 5)));
+            AiDoneDetailLog log = DetailLog(records, @"C:\Notes");
+            WaitingItem helper = DoneItem("Codex/h", At(10, 5)); helper.Helper = true;
+            log.Observe(new[] { helper, DoneItem("Claude/n", At(10, 5), @"C:\Notes\day") }, At(10, 5));
+            Assert(log.Due(At(10, 30)).Count == 0 && log.All().Count == 0 && records.Reads == 0);
+        });
+        Check("A record that cannot be read is skipped this time", () => {
+            int calls = 0;
+            var log = new AiDoneDetailLog(new string[0], At(9, 0), (item, after) => {
+                calls++;
+                if (calls == 1) throw new System.IO.IOException("busy");
+                return new List<AiTurn> { Ran(At(10, 0), At(10, 5)) };
+            });
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            Assert(log.Due(At(10, 15)).Count == 0 && log.Due(At(10, 16)).Count == 1);
+        });
+        Check("When the app ends, waiting work is given at once", () => {
+            var records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), Ran(At(10, 8), null) });
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            log.Due(At(10, 5, 30));
+            List<AiStretch> all = log.All();
+            Assert(all.Count == 1 && all[0].Turns.Count == 1 && all[0].End == At(10, 5));
+            Assert(log.All().Count == 0 && log.Due(At(10, 30)).Count == 0);
+        });
+        Check("Records are read at most once a minute per session", () => {
+            var records = new FakeRecords(); records.Turns.Add(Ran(At(10, 0), At(10, 5)));
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            for (int s = 0; s < 60; s += 10) log.Due(At(10, 5, s));
+            Assert(records.Reads == 1);
+            log.Due(At(10, 6, 0));
+            Assert(records.Reads == 2);
+        });
         Check("Commits made in the folder during the work are found", () => {
             string folder = TempFolder();
             try
