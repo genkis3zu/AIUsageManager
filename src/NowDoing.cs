@@ -270,7 +270,18 @@ namespace AIUsageManager
         }
 
         // The new diary text, or null with the reason when the record cannot be added.
+        // The same two-line form as the other records: the time on its own line, the text on the next.
         public static string Insert(string content, DateTime time, string text, NowDoingSettings settings, out NowDoingFailure failure, string mark = Mark)
+        {
+            return InsertEntry(content, time, TwoLines(time, text, mark), settings, out failure);
+        }
+        static string[] TwoLines(DateTime time, string text, string mark)
+        {
+            return new[] { "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", mark + " " + text };
+        }
+
+        // Adds an entry of any number of lines (the first being its time line) where a record at `time` goes.
+        public static string InsertEntry(string content, DateTime time, IList<string> entry, NowDoingSettings settings, out NowDoingFailure failure)
         {
             failure = NowDoingFailure.None;
             List<Line> lines = Split(content ?? "");
@@ -299,9 +310,7 @@ namespace AIUsageManager
             bool atEnd = next == lines.Count;
             var added = new List<Line>();
             if (run == 0) added.Add(new Line { Text = "", End = newline });
-            // The same two-line form as the other records: the time on its own line, the text on the next.
-            added.Add(new Line { Text = "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", End = newline });
-            added.Add(new Line { Text = mark + " " + text, End = newline });
+            foreach (string text in entry) added.Add(new Line { Text = text, End = newline });
             if (run <= 1 && !atEnd) added.Add(new Line { Text = "", End = newline });
             if (at == lines.Count && lines.Count > 0 && lines[lines.Count - 1].End.Length == 0)
             {
@@ -310,7 +319,7 @@ namespace AIUsageManager
                 added[added.Count - 1].End = "";
             }
             lines.InsertRange(at, added);
-            var result = new StringBuilder(content.Length + text.Length + 16);
+            var result = new StringBuilder(content.Length + entry.Sum(t => t.Length + 2) + 16);
             foreach (Line l in lines) result.Append(l.Text).Append(l.End);
             return result.ToString();
         }
@@ -361,6 +370,12 @@ namespace AIUsageManager
         // diary folder is synced and a rename can look like another file). The previous content is kept in `backupPath`.
         public static NowDoingFailure Write(NowDoingSettings settings, DateTime openedAt, string text, string backupPath, Action<int> sleep = null, string mark = Mark)
         {
+            return WriteEntry(settings, openedAt, TwoLines(openedAt, text, mark), backupPath, sleep);
+        }
+
+        // Writes an entry of any number of lines to the diary of the day `openedAt` falls on, where a record at that time goes.
+        public static NowDoingFailure WriteEntry(NowDoingSettings settings, DateTime openedAt, IList<string> entry, string backupPath, Action<int> sleep = null)
+        {
             if (string.IsNullOrEmpty(settings.Note)) return NowDoingFailure.NoSetting;
             string path = NotePath(settings.Note, openedAt);
             if (path == null) return NowDoingFailure.BadSetting;
@@ -385,7 +400,7 @@ namespace AIUsageManager
                 catch (SecurityException) { Close(file); file = null; }
                 if (file != null)
                 {
-                    try { return Change(file, old, settings, openedAt, text, backupPath, mark); }
+                    try { return Change(file, old, settings, openedAt, entry, backupPath); }
                     finally { Close(file); }
                 }
                 // Another app may be writing the diary. Nothing has been changed yet, so it is tried again:
@@ -405,13 +420,13 @@ namespace AIUsageManager
         // Adds the record to the open diary. The backup is written before the diary is touched; once writing the diary
         // has started, a failure is reported as it is and never retried, so the record is not added twice and the
         // backup keeps the content from before.
-        static NowDoingFailure Change(FileStream file, byte[] old, NowDoingSettings settings, DateTime openedAt, string text, string backupPath, string mark)
+        static NowDoingFailure Change(FileStream file, byte[] old, NowDoingSettings settings, DateTime openedAt, IList<string> entry, string backupPath)
         {
             bool bom;
             string content;
             if (!Decode(old, out bom, out content)) return NowDoingFailure.BadEncoding;
             NowDoingFailure failure;
-            string updated = Insert(content, openedAt, text, settings, out failure, mark);
+            string updated = InsertEntry(content, openedAt, entry, settings, out failure);
             if (updated == null) return failure;
             byte[] body = new UTF8Encoding(false).GetBytes(updated);
             var bytes = new byte[(bom ? 3 : 0) + body.Length];

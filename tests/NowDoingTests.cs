@@ -235,6 +235,24 @@ internal static partial class Tests
             Assert(NowDoingNote.Write(at("{yyyy-MM-dd}.md"), new DateTime(2026, 11, 24, 10, 40, 0), "Codex 完了: y", backup, null, "🤖") == NowDoingFailure.None);
             Assert(File.ReadAllText(real, Encoding.UTF8) == note.Replace("[11:05]\n", "[10:40]\n🤖 Codex 完了: y\n\n[11:05]\n"));
         });
+        Check("A multi-line entry goes where a two-line record would", () => {
+            NowDoingFailure failure;
+            var settings = new NowDoingSettings { Before = "📎 **今日の生成物**" };
+            var entry = new[] { "[10:40-10:55]", "🤖 **Claude Code: x**（作業 9分）", "> [!info]- 詳細", "> - y" };
+            var at1040 = new DateTime(2026, 11, 24, 10, 40, 0);
+            string done = NowDoingNote.InsertEntry(note, at1040, entry, settings, out failure);
+            Assert(failure == NowDoingFailure.None && done == note.Replace("[11:05]\n", string.Join("\n", entry) + "\n\n[11:05]\n"));
+            string crlf = note.Replace("\n", "\r\n");
+            Assert(NowDoingNote.InsertEntry(crlf, at1040, entry, settings, out failure) == crlf.Replace("[11:05]\r\n", string.Join("\r\n", entry) + "\r\n\r\n[11:05]\r\n"));
+            Assert(NowDoingNote.InsertEntry(note.Replace("## 📝 日中ログ", "## 別の見出し"), at1040, entry, settings, out failure) == null && failure == NowDoingFailure.NoHeading);
+        });
+        Check("A multi-line entry is written to the day it started", () => {
+            string day = Path.Combine(dir, "2026-11-23.md");
+            File.WriteAllText(day, note, new UTF8Encoding(false));
+            var entry = new[] { "[23:50-00:10]", "🤖 **Codex: z**（作業 15分）" };
+            Assert(NowDoingNote.WriteEntry(at("{yyyy-MM-dd}.md"), new DateTime(2026, 11, 23, 23, 50, 0), entry, backup) == NowDoingFailure.None);
+            Assert(File.ReadAllText(day, Encoding.UTF8) == note.Replace("昼食。\n\n📎", "昼食。\n\n" + string.Join("\n", entry) + "\n\n📎"));
+        });
         Check("The shortcut key is read from now_doing_hotkey and needs Ctrl, Alt or Win with one key", () => {
             Assert(NowDoingSettings.Parse("now_doing_hotkey=Ctrl+Alt+N\n").Hotkey == "Ctrl+Alt+N" && NowDoingSettings.Parse("").Hotkey == null);
             NowDoingHotkey k = NowDoingHotkey.Parse(" ctrl + alt + n ");
