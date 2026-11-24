@@ -203,6 +203,7 @@ namespace AIUsageManager
                     entry.LastRead = now;
                     List<AiTurn> turns = Read(entry.Item);
                     if (turns == null) continue;
+                    if (turns.Count == 0 && now - entry.Item.Since < Quiet) continue;
                     var mine = turns.Where(t => t.ByUser).ToList();
                     if (mine.Any(t => t.End == null)) continue;
                     if (mine.Count > 0 && now - mine.Max(t => t.End.Value) < Quiet) continue;
@@ -250,6 +251,14 @@ namespace AIUsageManager
             handled[key] = entry.Item.Since;
             pending.Remove(key);
             var stretches = new List<AiStretch>();
+            // No turns at all after the last written work, though the session finished since: the record is missing or
+            // its layout is not one this app knows. The finish is written without details.
+            if (turns.Count == 0)
+            {
+                WaitingItem item = entry.Item;
+                stretches.Add(new AiStretch { Key = key, Service = item.Service, Place = item.Place, Cwd = item.Cwd, Project = WaitingNames.Place(null, item.Cwd), Finished = item.Since });
+                return stretches;
+            }
             AiStretch current = null; DateTimeOffset last = DateTimeOffset.MinValue;
             foreach (var turn in mine.OrderBy(t => t.Start))
             {
@@ -271,8 +280,10 @@ namespace AIUsageManager
     {
         public string Key, Service, Place, Project, Cwd;
         public List<AiTurn> Turns = new List<AiTurn>();
-        public DateTimeOffset Start { get { return Turns.Count == 0 ? DateTimeOffset.MinValue : Turns.Min(t => t.Start); } }
-        public DateTimeOffset End { get { return Turns.Count == 0 ? DateTimeOffset.MinValue : Turns.Max(t => t.End ?? t.Start); } }
+        // Without turns (the record could not be read): when the waiting list saw the session finish.
+        public DateTimeOffset Finished;
+        public DateTimeOffset Start { get { return Turns.Count == 0 ? Finished : Turns.Min(t => t.Start); } }
+        public DateTimeOffset End { get { return Turns.Count == 0 ? Finished : Turns.Max(t => t.End ?? t.Start); } }
         public double WorkMs { get { return Turns.Sum(t => t.WorkMs); } }
     }
 
@@ -287,6 +298,13 @@ namespace AIUsageManager
             string from = stretch.Start.LocalDateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
             string to = stretch.End.LocalDateTime.ToString("HH:mm", CultureInfo.InvariantCulture);
             lines.Add(from == to ? "[" + from + "]" : "[" + from + "-" + to + "]");
+            // A record that could not be read gives the two lines the off setting writes.
+            if (stretch.Turns.Count == 0)
+            {
+                string place = AiDoneText.Clean(stretch.Place);
+                lines.Add(AiDoneLog.Mark + " " + stretch.Service + " 完了" + (place.Length > 0 ? ": " + place : ""));
+                return lines;
+            }
 
             bool codex = stretch.Service == "Codex";
             string name = AiDoneText.Clean(stretch.Place), project = AiDoneText.Clean(stretch.Project);

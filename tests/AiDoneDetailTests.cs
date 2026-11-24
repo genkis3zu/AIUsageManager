@@ -120,10 +120,26 @@ internal static partial class Tests
             Assert(log.Due(At(10, 30)).Count == 0 && records.Reads == reads);
         });
         Check("Work that ended before the app started is not written", () => {
-            var records = new FakeRecords(); records.Turns.Add(Ran(At(8, 0), At(8, 30)));
+            var records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(8, 0), At(8, 30)), Ran(At(9, 10), At(9, 15)) });
             AiDoneDetailLog log = DetailLog(records);
-            log.Observe(new[] { DoneItem("Claude/a", At(9, 5)) }, At(9, 5));
-            Assert(log.Due(At(9, 30)).Count == 0);
+            log.Observe(new[] { DoneItem("Claude/a", At(9, 15)) }, At(9, 15));
+            List<AiStretch> due = log.Due(At(9, 30));
+            Assert(due.Count == 1 && due[0].Turns.Count == 1 && due[0].Start == At(9, 10));
+        });
+        Check("A finish whose record cannot be read is written the way the off setting writes it", () => {
+            // No turns at all: the record is missing or its layout is unknown (a finish always has a turn after start-up).
+            var records = new FakeRecords();
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5, 30)) }, At(10, 5, 30));
+            Assert(log.Due(At(10, 15)).Count == 0);
+            List<AiStretch> due = log.Due(At(10, 16));
+            Assert(due.Count == 1 && due[0].Turns.Count == 0 && due[0].Start == At(10, 5, 30));
+            Assert(AiDoneFormat.Entry(due[0], new string[0], false).SequenceEqual(new[] { "[10:05]", "🤖 Claude 完了: 表の直し" }));
+            AiStretch unnamed = new AiStretch { Service = "Codex", Place = "", Finished = At(11, 0) };
+            Assert(AiDoneFormat.Entry(unnamed, new[] { "abc1234 x" }, false).SequenceEqual(new[] { "[11:00]", "🤖 Codex 完了" }));
+            log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/b", At(10, 5)) }, At(10, 5));
+            Assert(log.All().Count == 1);
         });
         Check("Turns ten minutes apart or closer are one piece of work; farther apart are two", () => {
             var records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(10, 0), At(10, 5)), Ran(At(10, 15), At(10, 20)) });

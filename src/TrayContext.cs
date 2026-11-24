@@ -288,7 +288,7 @@ namespace AIUsageManager
             var entries=new List<DiaryEntry>();
             foreach(var stretch in stretches)
             {
-                List<string> commits=GitCommits.Between(stretch.Cwd,stretch.Start,stretch.End);
+                List<string> commits=stretch.Turns.Count==0?new List<string>():GitCommits.Between(stretch.Cwd,stretch.Start,stretch.End);
                 DateTime start=stretch.Start.LocalDateTime;
                 entries.Add(new DiaryEntry{Time=new DateTime(start.Year,start.Month,start.Day,start.Hour,start.Minute,0),Lines=AiDoneFormat.Entry(stretch,commits.Take(5).ToList(),commits.Count>5)});
             }
