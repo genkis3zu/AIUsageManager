@@ -255,7 +255,9 @@ namespace AIUsageManager
             // be dragged), and only moves up when it grows past the bottom of the screen.
             if (!placed) Location = new Point(area.Left + (area.Width - Width) / 2, area.Top + (area.Height - Height) / 2);
             else if (Bottom > area.Bottom) Top = Math.Max(area.Top, area.Bottom - Height);
-            Invalidate();
+            // The controls on the window too: Windows keeps the old pixels when the window grows and its buttons move,
+            // so without this the buttons were not drawn where they moved to (the old list showed through).
+            Invalidate(true);
         }
 
         // The box grows with its lines up to six; past that it scrolls.

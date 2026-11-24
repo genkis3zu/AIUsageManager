@@ -421,6 +421,22 @@ internal static class UiTests
             Assert(Field<TextBox>(form,"input").Top>plainTop&&form.Footer.Count==0,"まだのこと sits above the box");
             SaveNowDoing(form,"now-doing-todo-light.png");
         }
+        // The list arrives after the window is shown and moves the box and the buttons down: they must be drawn again
+        // where they are now (Windows keeps the old pixels of a moved control unless it is asked to draw it again).
+        var later=new TaskCompletionSource<NowDoingScriptResult>();
+        var withButtons=Actions(written,null);withButtons.List=token=>later.Task;
+        withButtons.Buttons=Buttons("🚶 散歩|record:🚶 散歩 ✅","☕ 休憩|record:☕ 休憩 ✅",null,null,"⏱️ 作業|text:⏱️ ");
+        using(var form=new NowDoingForm(opened,view,withButtons,ThemePalette.Light))
+        {
+            form.Show();Application.DoEvents();form.Refresh();
+            var painted=new Dictionary<Button,int>();
+            foreach(Button b in form.ButtonControls){Button button=b;painted[button]=0;button.Paint+=(s,e)=>painted[button]++;}
+            int top=form.ButtonControls[0].Top;
+            later.SetResult(new NowDoingScriptResult{Ok=true,Output="一つ目\n二つ目"});
+            Pump(()=>form.Todo.Count==2);
+            Assert(form.ButtonControls[0].Top>top,"The buttons move down when まだのこと arrives");
+            Assert(Pump(()=>painted.Values.All(n=>n>0)),"Every button is drawn again after まだのこと arrives");
+        }
         var empty=Actions(written,null);empty.List=token=>Result(true,"");
         using(var form=new NowDoingForm(opened,view,empty,ThemePalette.Light))
         {
