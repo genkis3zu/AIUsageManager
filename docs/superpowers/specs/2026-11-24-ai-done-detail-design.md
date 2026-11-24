@@ -126,3 +126,15 @@
 - Claude Code の依頼で、予定のタスクやフックから送られたものの `turnOrigin` の値（`human` でないなら依頼に入らない。それでよいか）。
 - Codex の `role: user` の文に、利用者の依頼のほかに、Codex が足した文（環境の説明など）がどの形で入るか。
 - セッションの題として、対応待ちの一覧の名前（`~/.claude/sessions/*.json` の `name`）と、記録の中の `custom-title` のどちらが新しいか。
+
+## 確かめた結果（2026-11-24）
+
+- `turnOrigin` の値: この PC の新しい記録80件では `human`・`peer`・`task_notification`・`host_synthetic`・`sdk`・`auto_continuation` があった。`human` だけを利用者の作業として数える。
+  - デスクトップアプリで打った依頼は `human`（`promptSource` は `sdk`）。
+  - Claudian など、ほかのアプリが Claude Code を通して頼んだものは `sdk` で、記録の上では自動のエージェントと見分けられないため数えない（案内に書いた）。
+  - `auto_continuation` も数えない。
+  - 会話を縮めたときの要約（`isCompactSummary`）は、走っているターンの `turnOrigin` を写して `human` のこともあるため、ターンの始まりにも依頼にもしない。Claude Code の中で打つコマンド（`/model` など）や Esc で止めたことの知らせは `turnOrigin` のない `user` の記録で、ターンの始まりにも終わりの時刻にも使わない。
+  - デスクトップアプリの依頼は、前に `<system-reminder>…</system-reminder>` の部分が付くことがあるので、頭のタグのまとまりを外してから依頼を取る。
+- Codex の `role: user` の文: 利用者の依頼のほかに、`<environment_context>…`・`<heartbeat…>`・`<send_user_message_question_reply…>` のような `<` で始まるもの、`# AGENTS.md instructions for <フォルダー>` で始まるもの（フォルダーの決まりの全文）、`# Files mentioned by the user:` で始まり `## My request:` の後ろに依頼が続くもの、があった。`#` で始まるものは `## My request` の後ろだけを依頼にし、なければ入れない。
+- セッションの題: このセッションでは、対応待ちの一覧の名前と記録の最後の `custom-title` は同じだった。記録には対応待ちの一覧の名前を使う（今のまま）。
+- 実機（9 の手順）: トレイアプリを入れ替えて起動し直したあと、このセッション（Claude Code・除くフォルダーの外）の「マージして入れ替え」「確かめて」が、最後の返事から10分後に `[21:00-21:03]`・`🤖 **Claude Code: <セッションの題>**（AIUsageManager・作業 3分）` と、頼んだこと2件・返事の初めの3行の形で日中ログに入った。ほかの2つのセッションの作業も同じ形で入った。入れ替えの後は、Codex の定期の見回りのスレッドの完了（入れ替えの前は約20分おきに2行で入っていた）とレビューのスレッドは書かれなくなった。このときはその間のコミットがなく、📦 の行はなかった。
