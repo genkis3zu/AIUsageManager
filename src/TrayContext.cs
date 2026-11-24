@@ -245,11 +245,14 @@ namespace AIUsageManager
         DateTimeOffset doneDue,doneNextTry;
         // The detailed entries being made off the UI thread, so that the app ending meanwhile still writes them.
         Task<List<DiaryEntry>> detailMaking;
-        bool doneFlushed;
+        // Counts the writes at sign-out or exit. A WriteAiDone that a flush overtook stops after its await: the flush has
+        // taken over what it was doing.
+        int doneFlushes;
         // Writes the entry for finished AI work when it is due and the diary has been quiet for 10 seconds. A missing or
         // unwritable diary is not reported: the entry is dropped. The after script is never run for these entries.
         async Task WriteAiDone(DateTimeOffset now)
         {
+            int flushes=doneFlushes;
             if(aiDone!=null&&doneEntry==null&&doneQueue.Count==0)
             {
                 AiDoneEntry line=aiDone.Due(now);
@@ -261,7 +264,7 @@ namespace AIUsageManager
                 var detail=aiDoneDetail;
                 detailMaking=Task.Run(()=>DetailEntries(detail.Due(now)));
                 List<DiaryEntry> made=await detailMaking;
-                if(exiting)return;
+                if(exiting||flushes!=doneFlushes)return;
                 detailMaking=null;
                 foreach(var e in made)doneQueue.Enqueue(e);
             }
@@ -271,7 +274,7 @@ namespace AIUsageManager
             string path=string.IsNullOrEmpty(nowDoing.Note)?null:NowDoingNote.NotePath(nowDoing.Note,entry.Time);
             // The diary may be on a synced or network folder; it is looked at off this thread.
             DateTime? changed=path==null?null:await Task.Run(()=>DiaryChanged(path));
-            if(exiting)return;
+            if(exiting||flushes!=doneFlushes)return;
             if(changed==null){doneEntry=null;return;}
             AiDoneWait decision=AiDoneLog.Decide(changed.Value,now.UtcDateTime,doneDue.UtcDateTime);
             if(decision==AiDoneWait.Wait){doneNextTry=now.AddSeconds(10);return;}
@@ -295,16 +298,17 @@ namespace AIUsageManager
             return entries;
         }
         // When the app ends or Windows signs out: the waiting work is written at once, without waiting for the diary to be
-        // quiet, within 5 seconds in all. Only once.
+        // quiet, within 5 seconds in all. What it writes is taken out of the queue and the log, so after a cancelled sign-out
+        // the exit writes only what came later.
         void FlushAiDone()
         {
-            if(aiDoneDetail==null||doneFlushed||nowDoing==null)return;
-            doneFlushed=true;
+            if(aiDoneDetail==null||nowDoing==null)return;
+            doneFlushes++;
             var waiting=new List<DiaryEntry>();
             if(doneEntry!=null)waiting.Add(doneEntry);
             waiting.AddRange(doneQueue);
             doneEntry=null;doneQueue.Clear();
-            var detail=aiDoneDetail;var making=detailMaking;var settings=nowDoing;string backup=AiDoneBackup();
+            var detail=aiDoneDetail;var making=detailMaking;detailMaking=null;var settings=nowDoing;string backup=AiDoneBackup();
             try
             {
                 Task.Run(()=>

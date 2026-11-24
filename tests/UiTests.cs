@@ -139,6 +139,35 @@ internal static class UiTests
         }
         using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
         {
+            // Signing out writes the waiting AI done entries at once. When the sign-out is cancelled, quitting later writes
+            // what came after, and nothing twice.
+            string diary=Path.Combine(hookFixture,"2026-11-24.md");
+            File.WriteAllText(diary,"# 日誌\n\n## 📝 日中ログ\n\n[09:00]\n📝 前\n\n## 次\n",new System.Text.UTF8Encoding(false));
+            var detailOn=NowDoingSettings.Parse("now_doing_ai_done=on\nnow_doing_ai_done_detail=on\nnow_doing_note="+Path.Combine(hookFixture,"{yyyy-MM-dd}.md")+"\n");
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:detailOn);
+            Type entryType=typeof(TrayContext).GetNestedType("DiaryEntry",BindingFlags.NonPublic);
+            Func<int,string,object> entry=(minute,text)=>{
+                object e=Activator.CreateInstance(entryType,true);
+                entryType.GetField("Time").SetValue(e,new DateTime(2026,11,24,10,minute,0));
+                entryType.GetField("Lines").SetValue(e,new[]{"[10:"+minute.ToString("00")+"]","🤖 "+text});
+                return e;
+            };
+            object queue=Field<object>(tray,"doneQueue");
+            queue.GetType().GetMethod("Enqueue").Invoke(queue,new[]{entry(10,"一つ目")});
+            // An entry still being made off the UI thread when Windows signs out.
+            var made=(System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(entryType));
+            made.Add(entry(15,"作っている途中"));
+            object making=typeof(Task).GetMethod("FromResult").MakeGenericMethod(made.GetType()).Invoke(null,new object[]{made});
+            typeof(TrayContext).GetField("detailMaking",BindingFlags.Instance|BindingFlags.NonPublic).SetValue(tray,making);
+            typeof(TrayContext).GetMethod("OnSessionEnding",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(tray,new object[]{null,new SessionEndingEventArgs(SessionEndReasons.SystemShutdown)});
+            queue.GetType().GetMethod("Enqueue").Invoke(queue,new[]{entry(20,"二つ目")});
+            tray.ExitThread();
+            string written=File.ReadAllText(diary);
+            Func<string,int> count=t=>written.Split(new[]{t},StringSplitOptions.None).Length-1;
+            Assert(count("一つ目")==1&&count("作っている途中")==1&&count("二つ目")==1,"After a cancelled sign-out, quitting still writes the AI done entries that came later, and none twice");
+        }
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
             var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoingHotkey:"Ctrl+Alt+Shift+F23");
             Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey").Registered,"A shortcut key setting installs no keyboard hook");
             tray.ExitThread();
