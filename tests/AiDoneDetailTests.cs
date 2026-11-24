@@ -203,6 +203,29 @@ internal static partial class Tests
             log.Due(At(10, 6, 0));
             Assert(records.Reads == 2);
         });
+        Check("Claude Code records are found by the session id", () => {
+            string profile = TempFolder();
+            try
+            {
+                string folder = System.IO.Path.Combine(profile, ".claude", "projects", "A");
+                System.IO.Directory.CreateDirectory(folder);
+                string record = System.IO.Path.Combine(folder, "s1.jsonl");
+                System.IO.File.WriteAllText(record, string.Join("\n", Claude1()) + "\n");
+                Assert(AiTurnReader.ClaudeTranscript(profile, "s1") == record && AiTurnReader.ClaudeTranscript(profile, "s2") == null);
+                Assert(AiTurnReader.ClaudeTranscript(profile, @"..\A\s1") == null && AiTurnReader.ClaudeTranscript(profile, null) == null);
+                var claude = new WaitingItem { Key = "Claude/s1", Service = "Claude", Reason = WaitReason.Finished };
+                List<AiTurn> turns = AiTurnReader.Read(claude, At(9, 0), profile);
+                Assert(turns.Count == 3 && turns[0].Reply == "直しました");
+                var codexRecord = System.IO.Path.Combine(profile, "rollout.jsonl");
+                System.IO.File.WriteAllText(codexRecord, string.Join("\n", new[] { XStarted(At(10, 0), "composer"), XUser(At(10, 0, 1), "動かして"), XComplete(At(10, 0), At(10, 4), "動きました", 240000) }) + "\n");
+                var codex = new WaitingItem { Key = "Codex/t", Service = "Codex", RecordPath = codexRecord, Reason = WaitReason.Finished };
+                turns = AiTurnReader.Read(codex, At(9, 0), profile);
+                Assert(turns.Count == 1 && turns[0].Reply == "動きました");
+                Assert(AiTurnReader.Read(new WaitingItem { Key = "Codex/u", Service = "Codex" }, At(9, 0), profile).Count == 0);
+                Assert(AiTurnReader.Read(new WaitingItem { Key = "Claude/s2", Service = "Claude" }, At(9, 0), profile).Count == 0);
+            }
+            finally { RemoveFolder(profile); }
+        });
         Check("Commits made in the folder during the work are found", () => {
             string folder = TempFolder();
             try

@@ -275,7 +275,7 @@ namespace AIUsageManager
         {
             return InsertEntry(content, time, TwoLines(time, text, mark), settings, out failure);
         }
-        static string[] TwoLines(DateTime time, string text, string mark)
+        public static string[] TwoLines(DateTime time, string text, string mark)
         {
             return new[] { "[" + time.ToString("HH:mm", CultureInfo.InvariantCulture) + "]", mark + " " + text };
         }

@@ -98,6 +98,63 @@ namespace AIUsageManager
         }
     }
 
+    // Opens the record of a finished session or thread on this PC: Claude Code's <profile>\.claude\projects\<folder>\<id>.jsonl,
+    // Codex's rollout file from the waiting list. Nothing when there is no record. A record that has not changed since the
+    // last read is not read again.
+    internal static class AiTurnReader
+    {
+        sealed class Cached { public long Length; public DateTime Written; public DateTimeOffset After; public List<AiTurn> Turns; }
+        static readonly object gate = new object();
+        static readonly Dictionary<string, Cached> cache = new Dictionary<string, Cached>(StringComparer.OrdinalIgnoreCase);
+        static readonly Dictionary<string, string> claudePaths = new Dictionary<string, string>();
+
+        public static List<AiTurn> Read(WaitingItem item, DateTimeOffset after, string profile)
+        {
+            var none = new List<AiTurn>();
+            if (item == null || item.Key == null) return none;
+            bool codex = item.Service == "Codex";
+            string path = codex ? item.RecordPath : item.Key.StartsWith("Claude/") ? ClaudeTranscript(profile, item.Key.Substring("Claude/".Length)) : null;
+            if (string.IsNullOrEmpty(path)) return none;
+            var file = new FileInfo(path);
+            if (!file.Exists) return none;
+            lock (gate)
+            {
+                Cached hit;
+                if (cache.TryGetValue(path, out hit) && hit.Length == file.Length && hit.Written == file.LastWriteTimeUtc && hit.After == after) return hit.Turns;
+            }
+            var lines = ReadOnlyFiles.ReverseLines(path);
+            List<AiTurn> turns = codex ? CodexRollout.Turns(lines, after) : global::AIUsageManager.ClaudeTranscript.Turns(lines, after);
+            lock (gate) cache[path] = new Cached { Length = file.Length, Written = file.LastWriteTimeUtc, After = after, Turns = turns };
+            return turns;
+        }
+
+        // Only the folders right under projects are looked in; the session id must be a plain name.
+        public static string ClaudeTranscript(string profile, string sessionId)
+        {
+            if (string.IsNullOrEmpty(profile) || string.IsNullOrEmpty(sessionId) || !Regex.IsMatch(sessionId, "^[A-Za-z0-9_-]+$")) return null;
+            string known;
+            lock (gate) claudePaths.TryGetValue(sessionId, out known);
+            try
+            {
+                if (known != null && File.Exists(known)) return known;
+                string root = Path.Combine(profile, ".claude", "projects");
+                if (!Directory.Exists(root)) return null;
+                foreach (string folder in Directory.EnumerateDirectories(root))
+                {
+                    string path = Path.Combine(folder, sessionId + ".jsonl");
+                    if (!File.Exists(path)) continue;
+                    lock (gate) claudePaths[sessionId] = path;
+                    return path;
+                }
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            catch (SecurityException) { }
+            catch (ArgumentException) { }
+            return null;
+        }
+    }
+
     // Decides when finished AI work goes to the diary (now_doing_ai_done_detail=on). Each finished session or thread on
     // the waiting list is read from its record at most once a minute. Only the user's own turns count. The user's turns
     // with ten minutes or less between them are one piece of work, written ten minutes after the last one ended.

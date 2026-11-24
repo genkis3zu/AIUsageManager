@@ -119,14 +119,23 @@ internal static class UiTests
         {
             // Someone who has not set up いまやってること gets none of it from the tray app.
             var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse(""));
-            Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey")==null&&Field<AiDoneLog>(tray,"aiDone")==null,"Without the settings the tray app watches no keys and writes no AI done lines");
+            Assert(Field<DoubleTapHook>(tray,"nowDoingTap")==null&&Field<HotkeyWindow>(tray,"nowDoingKey")==null&&Field<AiDoneLog>(tray,"aiDone")==null&&Field<AiDoneDetailLog>(tray,"aiDoneDetail")==null,"Without the settings the tray app watches no keys and writes no AI done lines");
             tray.ExitThread();
         }
         using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
         {
             var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse("now_doing_ai_done=on\n"));
-            Assert(Field<AiDoneLog>(tray,"aiDone")!=null&&Field<DoubleTapHook>(tray,"nowDoingTap")==null,"now_doing_ai_done=on turns on only the AI done lines");
+            Assert(Field<AiDoneLog>(tray,"aiDone")!=null&&Field<AiDoneDetailLog>(tray,"aiDoneDetail")==null&&Field<DoubleTapHook>(tray,"nowDoingTap")==null,"now_doing_ai_done=on turns on only the AI done lines");
             tray.ExitThread();
+        }
+        using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
+        {
+            var tray=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse("now_doing_ai_done=on\nnow_doing_ai_done_detail=on\n"));
+            Assert(Field<AiDoneDetailLog>(tray,"aiDoneDetail")!=null&&Field<AiDoneLog>(tray,"aiDone")==null,"With the detail setting the tray app uses the detailed AI done lines");
+            tray.ExitThread();
+            var only=new TrayContext(false,show,new FakeSource(),new ThemeSettings(Path.Combine(hookFixture,"settings.ini")),new FakeLogin(),null,text=>{},null,null,nowDoing:NowDoingSettings.Parse("now_doing_ai_done_detail=on\n"));
+            Assert(Field<AiDoneDetailLog>(tray,"aiDoneDetail")!=null&&Field<AiDoneDetailLog>(only,"aiDoneDetail")==null&&Field<AiDoneLog>(only,"aiDone")==null,"The detail setting alone writes no AI done lines");
+            only.ExitThread();
         }
         using(var show=new EventWaitHandle(false,EventResetMode.AutoReset))
         {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Diagnostics;
 using System.Linq;
@@ -71,7 +72,17 @@ namespace AIUsageManager
         {
             // now_doing_ai_done=on: finished AI work goes to the 日中ログ of the diary in now_doing_note.
             this.nowDoing=nowDoing;
-            if(nowDoing!=null&&nowDoing.AiDone)aiDone=new AiDoneLog(nowDoing.AiDoneExclude);
+            if(nowDoing!=null&&nowDoing.AiDone)
+            {
+                // now_doing_ai_done_detail=on: each entry also says what was asked, what came back and the commits made.
+                string profile=Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                if(nowDoing.AiDoneDetail)
+                {
+                    aiDoneDetail=new AiDoneDetailLog(nowDoing.AiDoneExclude,DateTimeOffset.Now,(item,after)=>AiTurnReader.Read(item,after,profile));
+                    SystemEvents.SessionEnding+=OnSessionEnding;
+                }
+                else aiDone=new AiDoneLog(nowDoing.AiDoneExclude);
+            }
             startup=StartAtSignIn.StoreFor(startupStore,source!=null);
             this.waitingSource=waitingSource??(source==null?new LocalWaitingSource(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)):null);
             statusPages=statusSource??(source==null?(Func<CancellationToken,Task<ProviderStatus[]>>)(token=>StatusPages.FetchAsync(http,token)):null);
@@ -217,22 +228,46 @@ namespace AIUsageManager
                 if(changed||popup.Visible)popup.SetWaiting(list,now);
                 if(changed)PublishSnapshot();
                 foreach(string text in waitingReminders.Due(list.Items,now,waitingMode))waitingNotify(text);
-                if(aiDone!=null){aiDone.Observe(list.Items,now);await WriteAiDone(now);}
+                if(aiDone!=null)aiDone.Observe(list.Items,now);
+                if(aiDoneDetail!=null)aiDoneDetail.Observe(list.Items,now);
+                if(aiDone!=null||aiDoneDetail!=null)await WriteAiDone(now);
             }
             catch(Exception) { }
             finally { readingWaiting=false; }
         }
         readonly NowDoingSettings nowDoing;
         readonly AiDoneLog aiDone;
-        AiDoneEntry doneEntry;
+        readonly AiDoneDetailLog aiDoneDetail;
+        // An entry for the diary: the lines and the minute that decides where they go.
+        sealed class DiaryEntry { public DateTime Time; public IList<string> Lines; }
+        readonly Queue<DiaryEntry> doneQueue=new Queue<DiaryEntry>();
+        DiaryEntry doneEntry;
         DateTimeOffset doneDue,doneNextTry;
-        // Writes the line for finished AI work when it is due and the diary has been quiet for 10 seconds. A missing or
-        // unwritable diary is not reported: the line is dropped. The after script is never run for these lines.
+        // The detailed entries being made off the UI thread, so that the app ending meanwhile still writes them.
+        Task<List<DiaryEntry>> detailMaking;
+        bool doneFlushed;
+        // Writes the entry for finished AI work when it is due and the diary has been quiet for 10 seconds. A missing or
+        // unwritable diary is not reported: the entry is dropped. The after script is never run for these entries.
         async Task WriteAiDone(DateTimeOffset now)
         {
-            if(doneEntry==null) {doneEntry=aiDone.Due(now);if(doneEntry==null)return;doneDue=now;doneNextTry=now;}
+            if(aiDone!=null&&doneEntry==null&&doneQueue.Count==0)
+            {
+                AiDoneEntry line=aiDone.Due(now);
+                if(line!=null)doneQueue.Enqueue(new DiaryEntry{Time=line.Time,Lines=NowDoingNote.TwoLines(line.Time,line.Text,AiDoneLog.Mark)});
+            }
+            if(aiDoneDetail!=null)
+            {
+                // Reading the records and running git take time and are done off the UI thread.
+                var detail=aiDoneDetail;
+                detailMaking=Task.Run(()=>DetailEntries(detail.Due(now)));
+                List<DiaryEntry> made=await detailMaking;
+                if(exiting)return;
+                detailMaking=null;
+                foreach(var e in made)doneQueue.Enqueue(e);
+            }
+            if(doneEntry==null){if(doneQueue.Count==0)return;doneEntry=doneQueue.Dequeue();doneDue=now;doneNextTry=now;}
             if(now<doneNextTry)return;
-            AiDoneEntry entry=doneEntry;
+            DiaryEntry entry=doneEntry;
             string path=string.IsNullOrEmpty(nowDoing.Note)?null:NowDoingNote.NotePath(nowDoing.Note,entry.Time);
             // The diary may be on a synced or network folder; it is looked at off this thread.
             DateTime? changed=path==null?null:await Task.Run(()=>DiaryChanged(path));
@@ -242,9 +277,46 @@ namespace AIUsageManager
             if(decision==AiDoneWait.Wait){doneNextTry=now.AddSeconds(10);return;}
             doneEntry=null;
             if(decision==AiDoneWait.GiveUp)return;
-            string backup=NowDoingNote.BackupPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ai-done-last.md");
-            await Task.Run(()=>NowDoingNote.Write(nowDoing,entry.Time,entry.Text,backup,null,AiDoneLog.Mark));
+            string backup=AiDoneBackup();
+            await Task.Run(()=>NowDoingNote.WriteEntry(nowDoing,entry.Time,entry.Lines,backup));
         }
+        static string AiDoneBackup(){return NowDoingNote.BackupPath(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"ai-done-last.md");}
+        // The diary entries for pieces of work, with the commits made in the working folder meanwhile. Placed at the minute
+        // the piece of work started.
+        static List<DiaryEntry> DetailEntries(List<AiStretch> stretches)
+        {
+            var entries=new List<DiaryEntry>();
+            foreach(var stretch in stretches)
+            {
+                List<string> commits=GitCommits.Between(stretch.Cwd,stretch.Start,stretch.End);
+                DateTime start=stretch.Start.LocalDateTime;
+                entries.Add(new DiaryEntry{Time=new DateTime(start.Year,start.Month,start.Day,start.Hour,start.Minute,0),Lines=AiDoneFormat.Entry(stretch,commits.Take(5).ToList(),commits.Count>5)});
+            }
+            return entries;
+        }
+        // When the app ends or Windows signs out: the waiting work is written at once, without waiting for the diary to be
+        // quiet, within 5 seconds in all. Only once.
+        void FlushAiDone()
+        {
+            if(aiDoneDetail==null||doneFlushed||nowDoing==null)return;
+            doneFlushed=true;
+            var waiting=new List<DiaryEntry>();
+            if(doneEntry!=null)waiting.Add(doneEntry);
+            waiting.AddRange(doneQueue);
+            doneEntry=null;doneQueue.Clear();
+            var detail=aiDoneDetail;var making=detailMaking;var settings=nowDoing;string backup=AiDoneBackup();
+            try
+            {
+                Task.Run(()=>
+                {
+                    if(making!=null){try{waiting.AddRange(making.Result);}catch(AggregateException){}}
+                    waiting.AddRange(DetailEntries(detail.All()));
+                    foreach(var e in waiting)NowDoingNote.WriteEntry(settings,e.Time,e.Lines,backup);
+                }).Wait(5000);
+            }
+            catch(AggregateException){}
+        }
+        void OnSessionEnding(object sender,SessionEndingEventArgs e){FlushAiDone();}
         // When the diary was last written, or null when it is not there or cannot be looked at.
         static DateTime? DiaryChanged(string path)
         {
@@ -362,6 +434,7 @@ namespace AIUsageManager
         protected override void ExitThreadCore()
         {
             if(exiting)return;exiting=true;
+            if(aiDoneDetail!=null){SystemEvents.SessionEnding-=OnSessionEnding;FlushAiDone();}
             if(nowDoingKey!=null){nowDoingKey.Dispose();nowDoingKey=null;}
             if(nowDoingTap!=null)nowDoingTap.Dispose();
             SystemEvents.UserPreferenceChanged-=OnUserPreferenceChanged;
