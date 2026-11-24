@@ -24,6 +24,15 @@ internal static partial class Tests
     static string CThinking(DateTimeOffset at) { return CAssistant(at, "{'type':'thinking','thinking':'考え中'}"); }
     static string CTool(DateTimeOffset at) { return CAssistant(at, "{'type':'tool_use','id':'u1','name':'Edit','input':{}}"); }
     static string CSystem(DateTimeOffset at) { return Rec("{'type':'system','subtype':'stop_hook_summary','timestamp':'" + Stamp(at) + "','isSidechain':false}"); }
+    // A prompt whose content is several text parts (the desktop app puts its own part in front).
+    static string CPromptParts(DateTimeOffset at, params string[] parts)
+    {
+        return Rec("{'type':'user','timestamp':'" + Stamp(at) + "','isSidechain':false,'promptSource':'sdk','turnOrigin':'human','message':{'role':'user','content':[" + string.Join(",", parts.Select(p => "{'type':'text','text':'" + p + "'}")) + "]}}");
+    }
+    // A command run in Claude Code itself (/model and the like): a user record that does not start a turn.
+    static string CLocal(DateTimeOffset at) { return Rec("{'type':'user','timestamp':'" + Stamp(at) + "','isSidechain':false,'message':{'role':'user','content':'<command-name>/model</command-name>'}}"); }
+    // The summary Claude Code writes when it compacts the conversation; it copies the running turn's origin.
+    static string CCompact(DateTimeOffset at) { return Rec("{'type':'user','timestamp':'" + Stamp(at) + "','isSidechain':false,'isCompactSummary':true,'isVisibleInTranscriptOnly':true,'promptSource':'sdk','turnOrigin':'human','message':{'role':'user','content':'This session is being continued from a previous conversation'}}"); }
     static string[] Claude1()
     {
         return new[] {
@@ -118,6 +127,20 @@ internal static partial class Tests
             int reads = records.Reads;
             log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 17));
             Assert(log.Due(At(10, 30)).Count == 0 && records.Reads == reads);
+        });
+        Check("Work already written is not written again when its record later shows a later end", () => {
+            var records = new FakeRecords(); AiTurn first = Ran(At(10, 0), At(10, 5)); records.Turns.Add(first);
+            AiDoneDetailLog log = DetailLog(records);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 5)) }, At(10, 5));
+            Assert(log.Due(At(10, 15)).Count == 1);
+            first.End = At(10, 20);
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 20)) }, At(10, 20));
+            // Nothing new: not even the two lines written for a record that cannot be read.
+            Assert(log.Due(At(10, 40)).Count == 0);
+            records.Turns.Add(Ran(At(10, 30), At(10, 35)));
+            log.Observe(new[] { DoneItem("Claude/a", At(10, 35)) }, At(10, 35));
+            List<AiStretch> due = log.Due(At(10, 45));
+            Assert(due.Count == 1 && due[0].Turns.Count == 1 && due[0].Start == At(10, 30));
         });
         Check("Work that ended before the app started is not written", () => {
             var records = new FakeRecords(); records.Turns.AddRange(new[] { Ran(At(8, 0), At(8, 30)), Ran(At(9, 10), At(9, 15)) });
@@ -277,6 +300,9 @@ internal static partial class Tests
             string emoji = new string('あ', 99) + "😀";
             Assert(AiDoneText.Clean(emoji + "い") == new string('あ', 99) + "…");
             Assert(AiDoneText.Clean(null) == "" && AiDoneText.Clean("  ") == "");
+            // Markdown links would become notes to create, embeds would show files or load pictures, %% hides the rest, < starts HTML.
+            Assert(AiDoneText.Clean("見て [a.cs](src/a.cs) と ![図](https://x.invalid/a.png) を") == "見て a.cs と を");
+            Assert(AiDoneText.Clean("%%隠す%% <img src=x>") == "％％隠す％％ ＜img src=x>");
             // Written after "> - ", a leading [ ] would become a task in the diary.
             Assert(AiDoneText.Clean("[ ] やること") == "やること" && AiDoneText.Clean("[x] 済み") == "済み");
             Assert(AiDoneText.ReplyLines("- [ ] 確かめる", 3).SequenceEqual(new[] { "確かめる" }));
@@ -341,6 +367,21 @@ internal static partial class Tests
         Check("Claude Code turns stop at the given time", () => {
             List<AiTurn> turns = ClaudeTurns(Claude1(), At(10, 10));
             Assert(turns.Count == 1 && turns[0].Start == At(10, 20));
+        });
+        Check("Commands typed in Claude Code between turns neither move a turn's end nor leave it unfinished", () => {
+            List<AiTurn> turns = ClaudeTurns(new[] {
+                CPrompt(At(10, 0), "human", "表を直して"), CText(At(10, 5), "直しました"), CLocal(At(10, 20)),
+                CPrompt(At(10, 30), "human", "次"), CText(At(10, 35), "済みました"), CLocal(At(10, 36)),
+            }, At(9, 0));
+            Assert(turns.Count == 2 && turns[0].End == At(10, 5) && turns[0].WorkMs == 5 * 60000 && turns[1].End == At(10, 35));
+        });
+        Check("The request is found after the desktop app's own text, and a compaction summary is not a request", () => {
+            List<AiTurn> turns = ClaudeTurns(new[] {
+                CPromptParts(At(10, 0), "<system-reminder>決まり</system-reminder>", "本当の依頼"), CTool(At(10, 2)), CCompact(At(10, 3)), CText(At(10, 5), "直しました"),
+                CPrompt(At(10, 6), "human", "<system-reminder>決まり</system-reminder>\\n文の依頼"), CText(At(10, 7), "はい"),
+            }, At(9, 0));
+            Assert(turns.Count == 2 && turns[0].Requests.SequenceEqual(new[] { "本当の依頼" }) && turns[0].End == At(10, 5) && turns[0].Reply == "直しました");
+            Assert(turns[1].Requests.SequenceEqual(new[] { "文の依頼" }));
         });
         Check("Codex turns: user-started ones, the request and the final reply", () => {
             var lines = new[] {

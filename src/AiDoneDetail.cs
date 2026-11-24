@@ -20,6 +20,8 @@ namespace AIUsageManager
             var plain = new StringBuilder(text.Length);
             foreach (char c in text) plain.Append(char.IsControl(c) ? ' ' : c);
             string s = plain.ToString();
+            s = Regex.Replace(s, @"!\[[^\]]*\]\([^)]*\)", "");
+            s = Regex.Replace(s, @"\[([^\]]*)\]\([^)]*\)", "$1");
             s = Regex.Replace(s, @"!\[\[[^\]]*\]\]", "");
             s = Regex.Replace(s, @"\[\[[^\]|]*\|([^\]]*)\]\]", "$1");
             s = Regex.Replace(s, @"\[\[([^\]]*)\]\]", "$1");
@@ -27,7 +29,8 @@ namespace AIUsageManager
             s = Regex.Replace(s, @"\s+", " ").Trim();
             s = Regex.Replace(s, @"^#{1,6} ", "");
             s = Regex.Replace(s, @"^\[.\] ", "");
-            s = s.Replace("#", "＃");
+            // %% starts an Obsidian comment that hides the rest; < starts HTML (an <img> would load a picture).
+            s = s.Replace("#", "＃").Replace("%%", "％％").Replace("<", "＜");
             if (s.Length > max)
             {
                 int cut = max;
@@ -168,8 +171,10 @@ namespace AIUsageManager
         readonly DateTimeOffset since;
         readonly Func<WaitingItem, DateTimeOffset, List<AiTurn>> readTurns;
         readonly Dictionary<string, Pending> pending = new Dictionary<string, Pending>();
-        // Per session: the end of the last turn read when its work was written, and the finish already dealt with.
+        // Per session: the end and the start of the last turn read when its work was written, and the finish already dealt with.
+        // A turn's end in the record can move later (a stopped turn, a note after it), so written turns are known by their start.
         readonly Dictionary<string, DateTimeOffset> writtenEnd = new Dictionary<string, DateTimeOffset>();
+        readonly Dictionary<string, DateTimeOffset> writtenStart = new Dictionary<string, DateTimeOffset>();
         readonly Dictionary<string, DateTimeOffset> handled = new Dictionary<string, DateTimeOffset>();
 
         // `since`: work that ended before this (the app's start) is not written.
@@ -201,13 +206,14 @@ namespace AIUsageManager
                     Pending entry = pending[key];
                     if (entry.LastRead.HasValue && now - entry.LastRead.Value < ReadEvery) continue;
                     entry.LastRead = now;
-                    List<AiTurn> turns = Read(entry.Item);
+                    bool unreadable;
+                    List<AiTurn> turns = Read(entry.Item, out unreadable);
                     if (turns == null) continue;
-                    if (turns.Count == 0 && now - entry.Item.Since < Quiet) continue;
+                    if (unreadable && now - entry.Item.Since < Quiet) continue;
                     var mine = turns.Where(t => t.ByUser).ToList();
                     if (mine.Any(t => t.End == null)) continue;
                     if (mine.Count > 0 && now - mine.Max(t => t.End.Value) < Quiet) continue;
-                    result.AddRange(Finish(key, entry, turns, mine));
+                    result.AddRange(Finish(key, entry, turns, mine, unreadable));
                 }
             return result;
         }
@@ -220,40 +226,50 @@ namespace AIUsageManager
                 foreach (string key in pending.Keys.ToList())
                 {
                     Pending entry = pending[key];
-                    List<AiTurn> turns = Read(entry.Item);
+                    bool unreadable;
+                    List<AiTurn> turns = Read(entry.Item, out unreadable);
                     if (turns == null) continue;
-                    result.AddRange(Finish(key, entry, turns, turns.Where(t => t.ByUser && t.End != null).ToList()));
+                    result.AddRange(Finish(key, entry, turns, turns.Where(t => t.ByUser && t.End != null).ToList(), unreadable));
                 }
             return result;
         }
 
-        // The turns that ended after the last written work, or null when the record cannot be read this time.
-        // Claude Code writes no reply after the user stops a turn (Esc), so a turn without an end that started before the
-        // waiting list saw the session finish is taken to have ended then.
-        List<AiTurn> Read(WaitingItem item)
+        // The turns not written yet, or null when the record cannot be read this time. `unreadable`: the record gave no turns at
+        // all after the last written work, though the session finished since, so it is missing or its layout is not one this
+        // app knows. Claude Code writes no reply after the user stops a turn (Esc), so a turn without an end that started
+        // before the waiting list saw the session finish is taken to have ended then.
+        List<AiTurn> Read(WaitingItem item, out bool unreadable)
         {
-            DateTimeOffset after;
+            unreadable = false;
+            DateTimeOffset after, written;
             if (!writtenEnd.TryGetValue(item.Key, out after)) after = since;
+            bool any = writtenStart.TryGetValue(item.Key, out written);
             List<AiTurn> turns;
             try { turns = readTurns(item, after) ?? new List<AiTurn>(); }
             catch (Exception) { return null; }
-            return turns.Where(t => t != null).Select(t => t.End == null && t.Start < item.Since
+            turns = turns.Where(t => t != null).ToList();
+            unreadable = turns.Count == 0;
+            return turns.Where(t => !any || t.Start > written).Select(t => t.End == null && t.Start < item.Since
                 ? new AiTurn { Start = t.Start, End = item.Since, ByUser = t.ByUser, Requests = t.Requests, Reply = t.Reply, WorkMs = (item.Since - t.Start).TotalMilliseconds }
                 : t).ToList();
         }
 
-        List<AiStretch> Finish(string key, Pending entry, List<AiTurn> turns, List<AiTurn> mine)
+        List<AiStretch> Finish(string key, Pending entry, List<AiTurn> turns, List<AiTurn> mine, bool unreadable)
         {
             DateTimeOffset end;
             if (!writtenEnd.TryGetValue(key, out end)) end = since;
             foreach (var turn in turns) if (turn.End.HasValue && turn.End.Value > end) end = turn.End.Value;
             writtenEnd[key] = end;
+            if (turns.Count > 0)
+            {
+                DateTimeOffset start = turns.Max(t => t.Start), before;
+                if (!writtenStart.TryGetValue(key, out before) || start > before) writtenStart[key] = start;
+            }
             handled[key] = entry.Item.Since;
             pending.Remove(key);
             var stretches = new List<AiStretch>();
-            // No turns at all after the last written work, though the session finished since: the record is missing or
-            // its layout is not one this app knows. The finish is written without details.
-            if (turns.Count == 0)
+            // The record is missing or unknown: the finish is written without details.
+            if (unreadable)
             {
                 WaitingItem item = entry.Item;
                 stretches.Add(new AiStretch { Key = key, Service = item.Service, Place = item.Place, Cwd = item.Cwd, Project = WaitingNames.Place(null, item.Cwd), Finished = item.Since });

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace AIUsageManager
 {
@@ -34,13 +35,18 @@ namespace AIUsageManager
             var parts = content as object[];
             return parts != null && parts.OfType<Dictionary<string, object>>().Any(p => Json.Str(p, "type") == partType);
         }
-        // Text the apps add on their own (command tags, context blocks) starts with "<" and is not a request.
+        // Text the apps add on their own (command tags, context blocks such as <system-reminder>…</system-reminder>) comes as
+        // whole tag blocks in front of what the user typed. Those blocks are removed; what is left is the request, unless it
+        // still starts with "<".
         public static void AddRequest(List<string> requests, string text)
         {
             text = (text ?? "").Trim();
+            Match block;
+            while ((block = LeadingBlock.Match(text)).Success) text = text.Substring(block.Length).Trim();
             if (text.Length == 0 || text.StartsWith("<")) return;
             requests.Add(text);
         }
+        static readonly Regex LeadingBlock = new Regex(@"^<([A-Za-z][\w-]*)[^>]*>.*?</\1>", RegexOptions.Singleline);
         public static void Finish(AiTurn turn, DateTimeOffset? end)
         {
             turn.End = end;
@@ -63,6 +69,8 @@ namespace AIUsageManager
                 string type = Json.Str(row, "type");
                 if (type != "user" && type != "assistant") continue;
                 if (Json.Get(row, "isSidechain") as bool? == true) continue;
+                // The summary written when the conversation is compacted copies the running turn's origin; it is not a request.
+                if (Json.Get(row, "isCompactSummary") as bool? == true || Json.Get(row, "isVisibleInTranscriptOnly") as bool? == true) continue;
                 var at = Json.Date(Json.Get(row, "timestamp"));
                 if (!at.HasValue) continue;
                 records.Add(row);
@@ -84,8 +92,14 @@ namespace AIUsageManager
                     continue;
                 }
                 if (current == null) continue;
+                // Only the AI's own records and the results of its tools are part of the work: a command typed in Claude Code
+                // (/model…) or a note that the user stopped the turn neither moves the end nor leaves the turn unfinished.
+                if (Json.Str(row, "type") != "assistant")
+                {
+                    if (AiRecordText.Has(content, "tool_result")) { last = at; lastIsReply = false; }
+                    continue;
+                }
                 last = at; lastIsReply = false;
-                if (Json.Str(row, "type") != "assistant") continue;
                 string text = AiRecordText.Of(content, "text");
                 if (text == null || text.Trim().Length == 0) continue;
                 current.Reply = text;
