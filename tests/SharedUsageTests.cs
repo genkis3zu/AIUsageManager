@@ -20,6 +20,7 @@ internal static partial class Tests
         public HttpStatusCode Status = HttpStatusCode.OK;
         public string RetryAfter;
         public bool Fail;
+        public Action OnSend;
         public string ClaudeBody = J("{'five_hour':{'utilization':12,'resets_at':'2026-11-28T15:00:00Z'},'seven_day':{'utilization':34,'resets_at':'2026-12-01T00:00:00Z'}}");
         public string CodexBody = J("{'plan_type':'plus','rate_limit':{'primary_window':{'used_percent':21,'limit_window_seconds':18000,'reset_at':1795881600},'secondary_window':{'used_percent':43,'limit_window_seconds':604800,'reset_at':1796227200}}}");
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
@@ -27,8 +28,10 @@ internal static partial class Tests
             bool claude = request.RequestUri.Host == "api.anthropic.com";
             if (claude) Interlocked.Increment(ref Claude);
             else if (request.RequestUri.Host == "chatgpt.com") Interlocked.Increment(ref Codex);
+            if (OnSend != null) OnSend();
             if (Fail) throw new HttpRequestException("fixture network failure");
-            var response = new HttpResponseMessage(Status) { Content = new StringContent(Status == HttpStatusCode.OK ? (claude ? ClaudeBody : CodexBody) : "error") };
+            bool success = (int)Status >= 200 && (int)Status < 300;
+            var response = new HttpResponseMessage(Status) { Content = new StringContent(success ? (claude ? ClaudeBody : CodexBody) : "error") };
             if (RetryAfter != null) response.Headers.TryAddWithoutValidation("Retry-After", RetryAfter);
             return Task.FromResult(response);
         }
@@ -168,6 +171,11 @@ internal static partial class Tests
                 "{" + good + ",\"fetchedAt\":1795867080,\"body\":" + OtherClaudeBody + "}",
                 "{" + good + ",\"fetchedAt\":\"not a time\",\"body\":" + OtherClaudeBody + "}",
                 "{\"provider\":\"claude\",\"fetchedAt\":\"2026-11-28T11:58:00Z\",\"body\":" + OtherClaudeBody + "}",
+                // Times without Z or an offset are not UTC ISO 8601 (section 3).
+                "{" + good + ",\"fetchedAt\":\"2026-11-28T11:58:00\",\"body\":" + OtherClaudeBody + "}",
+                "{" + good + ",\"fetchedAt\":\"11:58\",\"body\":" + OtherClaudeBody + "}",
+                "{" + good + ",\"fetchedAt\":\"11/28/2026 11:58:00\",\"body\":" + OtherClaudeBody + "}",
+                "{" + good + ",\"fetchedAt\":\"Sat, 28 Nov 2026 11:58:00 GMT\",\"body\":" + OtherClaudeBody + "}",
                 "[]" };
             foreach (string json in broken)
             {
@@ -275,6 +283,89 @@ internal static partial class Tests
             Assert(refused.Codex == 1 && (string)ReadShared(limited, "codex.rate-limit.json")["until"] == "2026-11-28T12:05:00.000Z" && value.Status.Contains("取得制限中"));
             FetchAt(limited, refused, SharedNow.AddMinutes(1), false);
             Assert(refused.Codex == 1 && !File.Exists(SharedPath(limited, "claude.rate-limit.json")));
+        });
+        Check("A shared body full of characters the JSON writer escapes is used as it is and never stops fetching", () => {
+            string body = "{\"five_hour\":{\"utilization\":50},\"seven_day\":{\"utilization\":60},\"note\":\"" + new string('<', 1000000) + "\"}";
+            var fresh = Fixture(); ClaudeLogin(fresh); PutResult(fresh, "claude", "2026-11-28T11:58:00Z", body); var reuse = new SharedHttp();
+            var shown = FetchAt(fresh, reuse, SharedNow, false)[0];
+            Assert(new FileInfo(SharedPath(fresh, "claude.json")).Length < 1048576 && reuse.Claude == 0 && Shows(shown, 60) && shown.Status == "");
+            var old = Fixture(); ClaudeLogin(old); PutResult(old, "claude", "2026-11-28T11:00:00Z", body); var calls = new SharedHttp();
+            Assert(Shows(FetchAt(old, calls, SharedNow, false)[0], 34) && calls.Claude == 1);
+        });
+        Check("This app's own last result counts as the last successful fetch when the folder cannot be written", () => {
+            var root = Fixture(); ClaudeLogin(root); File.WriteAllText(Path.Combine(root, ".ai-usage-shared"), "a file where the folder would be");
+            var handler = new SharedHttp(); var now = new[] { At("2026-11-28T11:58:00Z") };
+            using (var http = new HttpClient(handler, false))
+            {
+                var service = new UsageService(root, http, () => now[0]);
+                service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult();
+                now[0] = SharedNow;
+                var timed = service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult()[0];
+                var byHand = service.FetchAllAsync(CancellationToken.None, true).GetAwaiter().GetResult()[0];
+                Assert(handler.Claude == 1 && Shows(timed, 34) && timed.RecordedAt == At("2026-11-28T11:58:00Z") && Shows(byHand, 34));
+            }
+        });
+        Check("This app's own last result from a clock that was set back is not reused", () => {
+            var root = Fixture(); ClaudeLogin(root); var handler = new SharedHttp(); var now = new[] { SharedNow };
+            using (var http = new HttpClient(handler, false))
+            {
+                var service = new UsageService(root, http, () => now[0]);
+                service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult();
+                now[0] = At("2026-11-28T11:00:00Z");
+                var value = service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult()[0];
+                Assert(handler.Claude == 2 && value.RecordedAt == At("2026-11-28T11:00:00Z"));
+            }
+        });
+        Check("Reuse ends at exactly 270 seconds for a timed refresh and 180 seconds for one by hand", () => {
+            foreach (var row in new[] { new object[] { "2026-11-28T11:55:31Z", false, 0 }, new object[] { "2026-11-28T11:55:30Z", false, 1 },
+                new object[] { "2026-11-28T11:57:01Z", true, 0 }, new object[] { "2026-11-28T11:57:00Z", true, 1 } })
+            {
+                var root = Fixture(); ClaudeLogin(root); PutResult(root, "claude", (string)row[0], OtherClaudeBody); var handler = new SharedHttp();
+                FetchAt(root, handler, SharedNow, (bool)row[1]);
+                Assert(handler.Claude == (int)row[2]);
+            }
+        });
+        Check("A limit ends at its until time, and a success at the same moment as the 429 ends it", () => {
+            var ended = Fixture(); ClaudeLogin(ended); PutLimit(ended, "claude", "2026-11-28T11:59:00Z", "2026-11-28T12:00:00Z"); var calls = new SharedHttp();
+            FetchAt(ended, calls, SharedNow, false); Assert(calls.Claude == 1);
+            var same = Fixture(); ClaudeLogin(same); PutLimit(same, "claude", "2026-11-28T11:50:00Z", "2026-11-28T12:20:00Z");
+            PutResult(same, "claude", "2026-11-28T11:50:00Z", OtherClaudeBody); var again = new SharedHttp();
+            FetchAt(same, again, SharedNow, false); Assert(again.Claude == 1);
+        });
+        Check("After an HTTP 429, this app's own last result is shown when the shared folder has none", () => {
+            var root = Fixture(); ClaudeLogin(root); File.WriteAllText(Path.Combine(root, ".ai-usage-shared"), "a file where the folder would be");
+            var handler = new SharedHttp(); var now = new[] { At("2026-11-28T11:50:00Z") };
+            using (var http = new HttpClient(handler, false))
+            {
+                var service = new UsageService(root, http, () => now[0]);
+                service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult();
+                now[0] = SharedNow; handler.Status = (HttpStatusCode)429;
+                var value = service.FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult()[0];
+                Assert(handler.Claude == 2 && Shows(value, 34) && value.RecordedAt == At("2026-11-28T11:50:00Z") && !value.Status.Contains("取得制限中"));
+            }
+        });
+        Check("Only HTTP 200 is written, and fetchedAt is when the response arrived", () => {
+            var other = Fixture(); ClaudeLogin(other); var partial = new SharedHttp { Status = HttpStatusCode.NonAuthoritativeInformation };
+            Assert(Shows(FetchAt(other, partial, SharedNow, false)[0], 34) && !File.Exists(SharedPath(other, "claude.json")));
+            var root = Fixture(); ClaudeLogin(root); var now = new[] { At("2026-11-28T11:59:50Z") };
+            var handler = new SharedHttp { OnSend = () => now[0] = SharedNow };
+            using (var http = new HttpClient(handler, false)) new UsageService(root, http, () => now[0]).FetchAllAsync(CancellationToken.None, false).GetAwaiter().GetResult();
+            Assert((string)ReadShared(root, "claude.json")["fetchedAt"] == "2026-11-28T12:00:00.000Z");
+        });
+        Check("Times are read with Z or an offset, and up to 60 seconds ahead", () => {
+            var offset = Fixture(); ClaudeLogin(offset); PutResult(offset, "claude", "2026-11-28T20:58:00.5+09:00", OtherClaudeBody); var reuse = new SharedHttp();
+            var shown = FetchAt(offset, reuse, SharedNow, false)[0];
+            Assert(reuse.Claude == 0 && shown.RecordedAt == At("2026-11-28T11:58:00.5Z"));
+            var ahead = Fixture(); ClaudeLogin(ahead); PutResult(ahead, "claude", "2026-11-28T12:01:00Z", OtherClaudeBody); var held = new SharedHttp();
+            FetchAt(ahead, held, SharedNow, false); Assert(held.Claude == 0);
+            var further = Fixture(); ClaudeLogin(further); PutResult(further, "claude", "2026-11-28T12:01:01Z", OtherClaudeBody); var calls = new SharedHttp();
+            FetchAt(further, calls, SharedNow, false); Assert(calls.Claude == 1);
+        });
+        Check("With an expired Claude login the shared folder is not read and login is asked for", () => {
+            var root = Fixture(); PutResult(root, "claude", "2026-11-28T11:58:00Z", OtherClaudeBody);
+            File.WriteAllText(Path.Combine(root, ".claude", ".credentials.json"), "{\"claudeAiOauth\":{\"accessToken\":\"fixture-claude\",\"expiresAt\":1000}}");
+            var handler = new SharedHttp(); var claude = FetchAt(root, handler, SharedNow, false)[0];
+            Assert(handler.Claude == 0 && claude.NeedsLogin && !claude.HasData);
         });
     }
 }

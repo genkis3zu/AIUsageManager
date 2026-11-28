@@ -40,6 +40,15 @@ int RunTests(int argc,wchar_t** argv)
     state.finish_refresh(100);assert(!state.due(300099));assert(state.due(300100));
     state.remove(L"restored");assert(!state.due(999999));
     std::wcout<<L"PASS widget state activation, deletion, restoration, overlap and cadence\n";
+    // Pressing 更新 on the widget is a refresh by hand; activation and the 5-minute timer are not.
+    state.activate(L"hand",false);assert(state.begin_refresh(0)&&!state.by_hand());state.finish_refresh(0);
+    state.request_by_hand();assert(state.begin_refresh(1)&&state.by_hand());state.finish_refresh(1);
+    assert(state.begin_refresh(300001)&&!state.by_hand());
+    state.request_by_hand();assert(!state.begin_refresh(300002));state.finish_refresh(300003);
+    assert(state.begin_refresh(300003)&&state.by_hand());state.finish_refresh(300004);
+    state.activate(L"hand",false);assert(state.begin_refresh(300005)&&!state.by_hand());state.finish_refresh(300006);
+    state.remove(L"hand");state.request_by_hand();assert(!state.due(999999));
+    std::wcout<<L"PASS widget refresh by hand only after its refresh button, also when pressed during a refresh\n";
     wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);
     assert(RunChild(path,L"--child-ok",3000).find("medium")!=std::string::npos);
     for(auto arg:{L"--child-hang",L"--child-big",L"--child-error"}) {

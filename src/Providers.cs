@@ -195,13 +195,19 @@ namespace AIUsageManager
             return null;
         }
         static string Limited(DateTimeOffset until) { return "取得制限中・" + until.ToLocalTime().ToString("HH:mm") + " 以降に再試行"; }
-        SharedResult Last(string provider) { lock (last) { SharedResult value; return last.TryGetValue(provider, out value) ? value : null; } }
+        // A result more than 60 seconds ahead of the clock (the clock was set back) is not used, the same as a shared file (section 6).
+        SharedResult Last(string provider, DateTimeOffset now)
+        {
+            SharedResult value;
+            lock (last) if (!last.TryGetValue(provider, out value)) return null;
+            return value.FetchedAt > now.AddSeconds(60) ? null : value;
+        }
         void Remember(string provider, SharedResult value) { lock (last) last[provider] = value; }
         // Section 5 of docs/usage-shared-cache-protocol.md. Returns null when the service should be called.
-        SharedDecision Decide(string provider, bool manual, DateTimeOffset now, Func<string, DateTimeOffset, ServiceUsage> parse)
+        SharedDecision Decide(string provider, bool manual, DateTimeOffset now, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
         {
             var file = shared.ReadResult(provider, now);
-            var own = Last(provider);
+            var own = Last(provider, now);
             // The last successful fetch: the shared file's, even when this app cannot read its body, or this app's own.
             DateTimeOffset? success = null;
             if (own != null) success = own.FetchedAt;
@@ -217,14 +223,14 @@ namespace AIUsageManager
         // The result to show: the newer of the shared file and this app's own last result, using the file only when
         // this app can read its body. A file it cannot read is shown only when there is nothing else, and then looks
         // the same as an unreadable answer to this app's own call (section 6).
-        static SharedResult Newest(SharedResult file, SharedResult own, Func<string, DateTimeOffset, ServiceUsage> parse)
+        static SharedResult Newest(SharedResult file, SharedResult own, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
         {
             if (file != null && (own == null || file.FetchedAt > own.FetchedAt) && parse(file.Body, file.FetchedAt).HasData) return file;
             return own ?? file;
         }
         // Calls the service only when the shared folder has no recent result and no limit, and leaves what it got there.
         // Returns the usage to show, or null with the reason put in failure.
-        async Task<ServiceUsage> Online(string provider, bool manual, Func<string, DateTimeOffset, ServiceUsage> parse, Func<HttpRequestMessage> request, CancellationToken cancellation, FetchResult failure)
+        async Task<ServiceUsage> Online(string provider, bool manual, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse, Func<HttpRequestMessage> request, CancellationToken cancellation, FetchResult failure)
         {
             var decision = Decide(provider, manual, clock(), parse);
             if (decision != null && decision.Use != null) return Show(provider, decision.Use, parse);
@@ -235,17 +241,19 @@ namespace AIUsageManager
                 var until = SharedUsageFolder.Until(response.ReceivedAt, response.RetryAfter);
                 shared.WriteRateLimit(provider, response.ReceivedAt, until);
                 // Another app may have fetched just before this call was refused: show the newest result there is.
-                var newest = Newest(shared.ReadResult(provider, clock()), Last(provider), parse);
+                var now = clock();
+                var newest = Newest(shared.ReadResult(provider, now), Last(provider, now), parse);
                 if (newest != null) return Show(provider, newest, parse);
                 failure.Error = Limited(until); return null;
             }
             if (response.Body == null) { failure.Error = response.Error; failure.NeedsLogin = response.NeedsLogin; return null; }
             if (response.Status == 200) shared.WriteResult(provider, response.Body, response.ReceivedAt);
-            var usage = parse(response.Body, response.ReceivedAt);
-            if (usage.HasData) Remember(provider, new SharedResult { Body = response.Body, FetchedAt = response.ReceivedAt });
+            var root = Json.Parse(response.Body);
+            var usage = parse(root, response.ReceivedAt);
+            if (usage.HasData) Remember(provider, new SharedResult { Body = root, FetchedAt = response.ReceivedAt });
             return usage;
         }
-        ServiceUsage Show(string provider, SharedResult value, Func<string, DateTimeOffset, ServiceUsage> parse)
+        ServiceUsage Show(string provider, SharedResult value, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
         {
             var usage = parse(value.Body, value.FetchedAt);
             if (usage.HasData) Remember(provider, value);

@@ -67,17 +67,18 @@ struct Provider:winrt::implements<Provider,P::IWidgetProvider>
     {
         {std::lock_guard lock(gate);stopping=true;SetEvent(cancel.value);}changed.notify_all();if(worker.joinable())worker.join();
     }
-    void Queue(P::WidgetContext const& context,bool activating=false)
+    // byHand: 更新 was pressed on the widget.
+    void Queue(P::WidgetContext const& context,bool activating=false,bool byHand=false)
     {
         if(context.DefinitionId()!=L"AIUsage")return;
         std::wstring id(context.Id());bool large=context.Size()==W::WidgetSize::Large;
-        {std::lock_guard lock(gate);state.restore(id,large,activating||context.IsActive());}changed.notify_one();
+        {std::lock_guard lock(gate);state.restore(id,large,activating||context.IsActive());if(byHand)state.request_by_hand();}changed.notify_one();
     }
     void CreateWidget(P::WidgetContext const& context){Queue(context);}
     void DeleteWidget(winrt::hstring const& id,winrt::hstring const&){std::lock_guard lock(gate);state.remove(std::wstring(id));}
     void OnActionInvoked(P::WidgetActionInvokedArgs const& args)
     {
-        if(args.Verb()==L"refresh")Queue(args.WidgetContext());
+        if(args.Verb()==L"refresh")Queue(args.WidgetContext(),false,true);
         else if(args.Verb()==L"open")OpenTray();
         else if(args.Verb()==L"login-claude")OpenTray(L"--login-claude");
         else if(args.Verb()==L"login-codex")OpenTray(L"--login-codex");
@@ -94,9 +95,10 @@ struct Provider:winrt::implements<Provider,P::IWidgetProvider>
             while(!stopping) {
                 changed.wait_for(lock,std::chrono::seconds(1),[this]{return stopping||state.due(GetTickCount64());});
                 if(stopping)break;if(!state.begin_refresh(GetTickCount64()))continue;
+                bool byHand=state.by_hand();
                 lock.unlock();
                 auto cards=std::make_pair(UnavailableCard(),UnavailableCard());
-                try{cards=ParseCards(RunChild(AppPath(),L"--widget-data",30000,cancel.value));}catch(...){}
+                try{cards=ParseCards(RunChild(AppPath(),byHand?L"--widget-refresh":L"--widget-data",30000,cancel.value));}catch(...){}
                 lock.lock();if(stopping)break;
                 auto snapshot=state.snapshot();
                 lock.unlock();

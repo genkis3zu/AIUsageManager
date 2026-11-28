@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 using System.Drawing;
@@ -532,6 +532,7 @@ internal static class UiTests
                 var claudeNeeds=ServiceUsage.Empty("Claude","Claude Code で再ログインが必要です");claudeNeeds.NeedsLogin=true;
                 Assert(UsageRow.ShowsLogin(claudeNeeds)&&UsageRow.ShowsLogin(authMissing)&&!UsageRow.ShowsLogin(ServiceUsage.Empty("Claude","")),"Login button appears for Claude, Codex and Grok when login is needed");
                 Assert(Program.LoginService(new[]{"--login-claude"})=="Claude"&&Program.LoginService(new[]{"--login-codex"})=="Codex"&&Program.LoginService(new[]{"--login-grok"})=="Grok"&&Program.LoginService(new[]{"--login-other"})==null&&Program.LoginService(new[]{"--login-claude","x"})==null,"Start arguments request login only for the three known services");
+                Assert(Program.WidgetFetch(new[]{"--widget-data"})==false&&Program.WidgetFetch(new[]{"--widget-refresh"})==true&&Program.WidgetFetch(new[]{"--widget-sample"})==null&&Program.WidgetFetch(new[]{"--widget-data","--widget-refresh"})==null,"The widget's 5-minute fetch is a timed one and its 更新 is one by hand");
                 Assert(Program.ShowsRunningApp(new string[0])&&Program.ShowsRunningApp(new[]{"--show"})&&!Program.ShowsRunningApp(new[]{"--background"})&&!Program.ShowsRunningApp(new[]{"--refresh"})&&!Program.ShowsRunningApp(new[]{"--login-codex"}),"A second start opens the running app's window, but not a start in the background");
                 var three=new ServiceUsage{Name="Claude",Plan="Max",Source="オンライン",RecordedAt=DateTimeOffset.Now};
                 three.Windows.Add(UsageWindow.FiveHour(10,DateTimeOffset.Now.AddHours(3)));three.Windows.Add(UsageWindow.Week(20,DateTimeOffset.Now.AddDays(3)));three.Windows.Add(UsageWindow.Scoped("Fable",96,DateTimeOffset.Now.AddDays(3)));

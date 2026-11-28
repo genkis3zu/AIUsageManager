@@ -34,6 +34,15 @@ namespace AIUsageManager
             if(LoginService(args)!=null)return false;
             return !(args!=null&&args.Length==1&&(args[0]=="--refresh"||args[0]==StartAtSignIn.Argument));
         }
+        // The widget fetches with --widget-data every 5 minutes and with --widget-refresh when 更新 is pressed on it.
+        // Returns whether the fetch is one by hand, or null when the arguments are not a widget fetch.
+        internal static bool? WidgetFetch(string[] args)
+        {
+            if(args==null||args.Length!=1)return null;
+            if(args[0]=="--widget-data")return false;
+            if(args[0]=="--widget-refresh")return true;
+            return null;
+        }
         [STAThread]
         static void Main(string[] args)
         {
@@ -46,14 +55,15 @@ namespace AIUsageManager
                 return;
             }
             // This path is an anonymous-pipe worker, independent of the visible tray instance.
-            if(args.Length==1&&(args[0]=="--widget-data"||args[0]=="--widget-sample"))
+            bool? widgetByHand=WidgetFetch(args);
+            if(widgetByHand.HasValue||(args.Length==1&&args[0]=="--widget-sample"))
             {
                 ServiceUsage[] values=WidgetCards.Unavailable();
                 try {
                     ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12;
                     if(args[0]=="--widget-sample")values=WidgetCards.Sample(DateTimeOffset.Now);
                     else using(var cancellation=new CancellationTokenSource(TimeSpan.FromSeconds(25)))using(var http=UsageService.CreateHttpClient())
-                        values=new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),http).FetchAllAsync(cancellation.Token).GetAwaiter().GetResult();
+                        values=new UsageService(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),http).FetchAllAsync(cancellation.Token,widgetByHand==true).GetAwaiter().GetResult();
                     using(var output=new StreamWriter(Console.OpenStandardOutput(),new UTF8Encoding(false)))output.Write(WidgetCards.Create(values,DateTimeOffset.Now));
                 } catch { Environment.ExitCode=1; }
                 return;

@@ -10,11 +10,11 @@ using System.Web.Script.Serialization;
 
 namespace AIUsageManager
 {
-    // A successful response, with the time it arrived. Body is the response JSON as text.
+    // A successful response, with the time it arrived. Body is the response JSON as read, never written back as text.
     internal sealed class SharedResult
     {
         public DateTimeOffset FetchedAt;
-        public string Body;
+        public Dictionary<string, object> Body;
     }
     internal sealed class SharedRateLimit
     {
@@ -47,7 +47,7 @@ namespace AIUsageManager
             var fetched = Time(data, "fetchedAt");
             var body = Json.Obj(data, "body");
             if (!fetched.HasValue || body == null || fetched.Value > now.AddSeconds(60)) return null;
-            return new SharedResult { FetchedAt = fetched.Value, Body = Serialize(body) };
+            return new SharedResult { FetchedAt = fetched.Value, Body = body };
         }
         public SharedRateLimit ReadRateLimit(string provider, DateTimeOffset now)
         {
@@ -95,7 +95,7 @@ namespace AIUsageManager
                     if (data != null) return Number(data, "version") == Version && Json.Str(data, "provider") == provider ? data : null;
                 }
                 catch (IOException) { }
-                catch (UnauthorizedAccessException) { return null; }
+                catch (UnauthorizedAccessException) { }
                 catch (ArgumentException) { return null; }
                 catch (NotSupportedException) { return null; }
                 // The other app may have been replacing the file just then: read it once more (section 6).
@@ -104,11 +104,14 @@ namespace AIUsageManager
             return null;
         }
         static double? Number(Dictionary<string, object> data, string key) { return Json.Number(Json.Get(data, key)); }
-        // Times are UTC ISO 8601 text; a number or other value is not a time here.
+        // Times are ISO 8601 text ending in Z or an offset such as +09:00 (section 3). A number, a time without either
+        // (another app might read it as local time) or any other text is not a time here.
+        static readonly string[] TimeFormats = {
+            "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", "yyyy-MM-dd'T'HH:mm:sszzz", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz" };
         static DateTimeOffset? Time(Dictionary<string, object> data, string key)
         {
             string value = Json.Str(data, key); DateTimeOffset result;
-            return value != null && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out result) ? result : (DateTimeOffset?)null;
+            return value != null && DateTimeOffset.TryParseExact(value, TimeFormats, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out result) ? result : (DateTimeOffset?)null;
         }
         static string Text(DateTimeOffset value) { return value.UtcDateTime.ToString(TimeFormat, CultureInfo.InvariantCulture); }
         static string Serialize(object value) { return new JavaScriptSerializer { MaxJsonLength = 4194304, RecursionLimit = 64 }.Serialize(value); }

@@ -9,7 +9,7 @@ struct WidgetSlot { bool large=false; bool active=false; };
 class ProviderState
 {
     std::map<std::wstring,WidgetSlot> slots_;
-    bool refreshing_=false,requested_=false;
+    bool refreshing_=false,requested_=false,byHandRequested_=false,byHand_=false;
     uint64_t next_=0;
 public:
     void restore(std::wstring const& id,bool large,bool active){slots_[id]={large,active};requested_|=active;}
@@ -19,7 +19,10 @@ public:
     bool contains(std::wstring const& id) const{return slots_.contains(id);}
     size_t active_count() const{return static_cast<size_t>(std::count_if(slots_.begin(),slots_.end(),[](auto const& pair){return pair.second.active;}));}
     bool due(uint64_t now) const{return !refreshing_&&active_count()>0&&(requested_||now>=next_);}
-    bool begin_refresh(uint64_t now){if(!due(now))return false;refreshing_=true;requested_=false;return true;}
+    // 更新 pressed on a widget: the next refresh is one by hand (the app then reuses another app's result for 180 seconds, not 270).
+    void request_by_hand(){if(active_count()==0)return;requested_=true;byHandRequested_=true;}
+    bool begin_refresh(uint64_t now){if(!due(now))return false;refreshing_=true;requested_=false;byHand_=byHandRequested_;byHandRequested_=false;return true;}
+    bool by_hand() const{return byHand_;}
     void finish_refresh(uint64_t now){refreshing_=false;next_=now+300000;}
     auto snapshot() const{return slots_;}
 };
