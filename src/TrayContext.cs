@@ -15,7 +15,7 @@ namespace AIUsageManager
     {
         readonly NotifyIcon tray;
         readonly PopupForm popup = new PopupForm();
-        readonly System.Windows.Forms.Timer refreshTimer = new System.Windows.Forms.Timer { Interval = 300000 };
+        readonly System.Windows.Forms.Timer refreshTimer = new System.Windows.Forms.Timer { Interval = (int)UsageService.RefreshInterval.TotalMilliseconds };
         readonly System.Windows.Forms.Timer displayTimer = new System.Windows.Forms.Timer { Interval = 15000 };
         readonly CancellationTokenSource cancellation = new CancellationTokenSource();
         readonly HttpClient http = UsageService.CreateHttpClient();
@@ -100,7 +100,7 @@ namespace AIUsageManager
             waitingNotify=waitingNotification??(text=>tray.ShowBalloonTip(8000,"対応待ち",text,ToolTipIcon.Info));
             warnStartup=startupWarning??(text=>tray.ShowBalloonTip(8000,"サインイン時の起動",text,ToolTipIcon.Warning));
             menu.Items.Add("使用量を表示",null,(s,e)=>ShowPopup());
-            menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage());
+            menu.Items.Add("更新",null,async (s,e)=>await RefreshUsage(true));
             foreach(string name in LoginServices) { string serviceName=name;loginMenu.DropDownItems.Add(name+" にログイン",null,async(s,e)=>await Login(serviceName)); }
             menu.Items.Add(loginMenu);
             AddThemeChoice("Windowsに合わせる",ThemeMode.System);
@@ -156,7 +156,7 @@ namespace AIUsageManager
                 if(popup.Visible)popup.Hide();
                 else if((DateTimeOffset.UtcNow-popup.LastDeactivated).TotalMilliseconds>350)ShowPopup();
             };
-            popup.RefreshRequested+=async(s,e)=>await RefreshUsage();
+            popup.RefreshRequested+=async(s,e)=>await RefreshUsage(true);
             popup.LoginRequested+=async name=>await Login(name);
             popup.WaitingOpenRequested+=app=>AppLinks.Open(app);
             if(loginSignals!=null)for(int i=0;i<Math.Min(loginWaits.Length,loginSignals.Length);i++) {
@@ -165,19 +165,19 @@ namespace AIUsageManager
                     try { if(!exiting)popup.BeginInvoke(new Action(async()=>await Login(name))); }catch(InvalidOperationException){}
                 },null,Timeout.Infinite,false);
             }
-            refreshTimer.Tick+=async(s,e)=>await RefreshUsage();
+            refreshTimer.Tick+=async(s,e)=>await RefreshUsage(false);
             displayTimer.Tick+=(s,e)=>popup.TickDisplay();displayTimer.Start();
             showWait=ThreadPool.RegisterWaitForSingleObject(showEvent,(state,timedOut)=> {
                 try { if(!exiting)popup.BeginInvoke(new Action(ShowPopup)); }catch(InvalidOperationException){}
             },null,Timeout.Infinite,false);
             if(refreshSignal!=null)refreshWait=ThreadPool.RegisterWaitForSingleObject(refreshSignal,(state,timedOut)=> {
-                try {if(!exiting)popup.BeginInvoke(new Action(async()=>await RefreshUsage()));}catch(InvalidOperationException){}
+                try {if(!exiting)popup.BeginInvoke(new Action(async()=>await RefreshUsage(true)));}catch(InvalidOperationException){}
             },null,Timeout.Infinite,false);
             if(this.waitingSource!=null) {
                 waitingTimer.Tick+=async(s,e)=>await ReadWaiting();waitingTimer.Start();
                 popup.BeginInvoke(new Action(async()=>await ReadWaiting()));
             }
-            popup.BeginInvoke(new Action(async()=> { if(show)ShowPopup();await RefreshUsage(); }));
+            popup.BeginInvoke(new Action(async()=> { if(show)ShowPopup();await RefreshUsage(false); }));
         }
         void AddThemeChoice(string label,ThemeMode mode)
         {
@@ -377,10 +377,11 @@ namespace AIUsageManager
                 if(error!=null)MessageBox.Show(error,name+" ログイン",MessageBoxButtons.OK,MessageBoxIcon.Information);
                 // Let an earlier request finish so it cannot overwrite the post-login result.
                 while(refreshing&&!exiting)await Task.Delay(100);
-                if(!exiting){await RefreshUsage();ShowPopup();}
+                if(!exiting){await RefreshUsage(true);ShowPopup();}
             } finally {loggingIn=false;if(!exiting){loginMenu.Enabled=true;popup.SetLoginBusy(false);}}
         }
-        async Task RefreshUsage()
+        // manual: asked for by the user (更新, F5, --refresh, after a login); the shared folder then reuses a result for 180 seconds instead of 270.
+        async Task RefreshUsage(bool manual)
         {
             if(refreshing||exiting||clearingHistory)return;
             refreshing=true;refreshTimer.Stop();popup.SetRefresh(true,nextRefresh);menu.Items[1].Enabled=false;learningMenu.Enabled=false;
@@ -388,7 +389,7 @@ namespace AIUsageManager
             try
             {
                 var statusTask=statusPages==null?null:statusPages(cancellation.Token);
-                var result=await service.FetchAllAsync(cancellation.Token);
+                var result=await service.FetchAllAsync(cancellation.Token,manual);
                 ProviderStatus[] providers=null;
                 if(statusTask!=null)try {providers=await statusTask;}catch(Exception){providers=null;}
                 if(exiting)return;
@@ -414,7 +415,7 @@ namespace AIUsageManager
             {
                 refreshing=false;
                 if(!exiting)PublishSnapshot();
-                if(!exiting) {nextRefresh=DateTimeOffset.Now.AddMinutes(5);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;learningMenu.Enabled=true;refreshTimer.Start();}
+                if(!exiting) {nextRefresh=DateTimeOffset.Now.Add(UsageService.RefreshInterval);popup.SetRefresh(false,nextRefresh);menu.Items[1].Enabled=true;learningMenu.Enabled=true;refreshTimer.Start();}
             }
         }
         void PublishSnapshot() { if(snapshots!=null)snapshots.Publish(UsageSnapshot.Create(latest,DateTimeOffset.Now,refreshing,latestStatus,latestWaiting)); }

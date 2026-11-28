@@ -136,7 +136,7 @@ internal static partial class Tests
                 var value=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult()[1];
                 Assert(value.Windows[0].Percent==7 && value.Plan=="Pro Lite" && value.Source=="オンライン" && value.RecordedAt>DateTimeOffset.UtcNow.AddMinutes(-1) && value.Windows[0].ResetsAt.HasValue && handler.Calls==1 && handler.HeadersCorrect);
             }
-            Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
+            Assert(OnlySharedFolderAdded(root,paths,bytes,"codex.json"));
         });
         Check("Codex online primary five-hour and secondary weekly zero are both shown", () => {
             var root=Fixture();CodexAuth(root);
@@ -235,7 +235,7 @@ internal static partial class Tests
                 var values=new UsageService(root,http).FetchAllAsync(CancellationToken.None).GetAwaiter().GetResult();
                 Assert(values[0].Windows[1].Percent==98 && values[0].Plan=="Ultra" && values[2].Windows[0].Percent==42 && handler.Calls==3 && handler.HeadersCorrect);
             }
-            Assert(paths.Length==Directory.GetFiles(root,"*",SearchOption.AllDirectories).Length && paths.Select(File.ReadAllText).SequenceEqual(bytes));
+            Assert(OnlySharedFolderAdded(root,paths,bytes,"claude.json"));
         });
         Check("Network error is isolated and never emits server body", () => {
             var root=Fixture();Auth(root);File.WriteAllText(Path.Combine(root,".codex","sessions","one.jsonl"),Weekly(55));
@@ -320,6 +320,14 @@ internal static partial class Tests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         { throw new HttpRequestException("fixture network failure"); }
+    }
+    // The service's own files are unchanged; the only new files are the result and README.txt in the shared folder.
+    static bool OnlySharedFolderAdded(string root,string[] before,string[] contents,string result)
+    {
+        string folder=Path.Combine(root,".ai-usage-shared");
+        var after=Directory.GetFiles(root,"*",SearchOption.AllDirectories);
+        var added=after.Except(before).Select(p=>p.Substring(folder.Length+1)).OrderBy(n=>n,StringComparer.Ordinal).ToArray();
+        return after.Except(before).All(p=>Path.GetDirectoryName(p)==folder) && added.SequenceEqual(new[]{"README.txt",result}) && before.Select(File.ReadAllText).SequenceEqual(contents);
     }
     static void CodexAuth(string root)
     { File.WriteAllText(Path.Combine(root,".codex","auth.json"),"{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"fixture-codex\",\"account_id\":\"fixture-account\",\"refresh_token\":\"never-use\"}}"); }

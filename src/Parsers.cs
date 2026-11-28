@@ -83,9 +83,10 @@ namespace AIUsageManager
         // Claude reports its limits in a `limits` list (session = 5 hours, weekly_all, weekly_scoped per model).
         // The older five_hour / seven_day fields fill in a 5-hour or weekly window the list does not contain.
         public static ServiceUsage Claude(string json, string plan, DateTimeOffset? time, string source)
+        { return Claude(Json.Parse(json), plan, time, source); }
+        internal static ServiceUsage Claude(Dictionary<string, object> root, string plan, DateTimeOffset? time, string source)
         {
             var result = new ServiceUsage { Name = "Claude", Plan = Json.Plan(plan, null), RecordedAt = time, Source = source };
-            var root = Json.Parse(json);
             var usage = Json.Obj(root, "rate_limits") ?? root;
             UsageWindow session = null, weekly = null;
             var scoped = new List<UsageWindow>();
@@ -144,8 +145,9 @@ namespace AIUsageManager
             return result;
         }
         public static ServiceUsage CodexOnline(string json, DateTimeOffset time)
+        { return CodexOnline(Json.Parse(json), time); }
+        internal static ServiceUsage CodexOnline(Dictionary<string, object> root, DateTimeOffset time)
         {
-            var root = Json.Parse(json);
             var result = CodexWindows(Json.Obj(root, "rate_limit"), "primary_window", "secondary_window", "limit_window_seconds", 18000, 604800, "reset_at");
             result.Plan = Json.Plan(Json.Str(root, "plan_type"), null);
             result.Source = "オンライン"; result.RecordedAt = time;

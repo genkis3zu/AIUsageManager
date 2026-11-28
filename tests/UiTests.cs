@@ -26,9 +26,10 @@ internal static class UiTests
     sealed class FakeSource : IUsageSource
     {
         public int Calls;
+        public bool LastManual;
         TaskCompletionSource<ServiceUsage[]> pending;
-        public Task<ServiceUsage[]> FetchAllAsync(CancellationToken cancellation)
-        { Calls++;pending=new TaskCompletionSource<ServiceUsage[]>();return pending.Task; }
+        public Task<ServiceUsage[]> FetchAllAsync(CancellationToken cancellation, bool manual)
+        { Calls++;LastManual=manual;pending=new TaskCompletionSource<ServiceUsage[]>();return pending.Task; }
         public void Complete()
         { pending.SetResult(new[]{ServiceUsage.Empty("Claude",""),ServiceUsage.Empty("Codex",""),ServiceUsage.Empty("Grok","")}); }
         public void Complete(ServiceUsage[] values) { pending.SetResult(values); }
@@ -531,6 +532,7 @@ internal static class UiTests
                 var claudeNeeds=ServiceUsage.Empty("Claude","Claude Code で再ログインが必要です");claudeNeeds.NeedsLogin=true;
                 Assert(UsageRow.ShowsLogin(claudeNeeds)&&UsageRow.ShowsLogin(authMissing)&&!UsageRow.ShowsLogin(ServiceUsage.Empty("Claude","")),"Login button appears for Claude, Codex and Grok when login is needed");
                 Assert(Program.LoginService(new[]{"--login-claude"})=="Claude"&&Program.LoginService(new[]{"--login-codex"})=="Codex"&&Program.LoginService(new[]{"--login-grok"})=="Grok"&&Program.LoginService(new[]{"--login-other"})==null&&Program.LoginService(new[]{"--login-claude","x"})==null,"Start arguments request login only for the three known services");
+                Assert(Program.WidgetFetch(new[]{"--widget-data"})==false&&Program.WidgetFetch(new[]{"--widget-refresh"})==true&&Program.WidgetFetch(new[]{"--widget-sample"})==null&&Program.WidgetFetch(new[]{"--widget-data","--widget-refresh"})==null,"The widget's 5-minute fetch is a timed one and its 更新 is one by hand");
                 Assert(Program.ShowsRunningApp(new string[0])&&Program.ShowsRunningApp(new[]{"--show"})&&!Program.ShowsRunningApp(new[]{"--background"})&&!Program.ShowsRunningApp(new[]{"--refresh"})&&!Program.ShowsRunningApp(new[]{"--login-codex"}),"A second start opens the running app's window, but not a start in the background");
                 var three=new ServiceUsage{Name="Claude",Plan="Max",Source="オンライン",RecordedAt=DateTimeOffset.Now};
                 three.Windows.Add(UsageWindow.FiveHour(10,DateTimeOffset.Now.AddHours(3)));three.Windows.Add(UsageWindow.Week(20,DateTimeOffset.Now.AddDays(3)));three.Windows.Add(UsageWindow.Scoped("Fable",96,DateTimeOffset.Now.AddDays(3)));
@@ -550,14 +552,14 @@ internal static class UiTests
                 var darkPalette=ThemePalette.Resolve(ThemeMode.Dark);var lightPalette=ThemePalette.Resolve(ThemeMode.Light);
                 Assert(dark.Checked&&popup.BackColor==darkPalette.Surface,"Startup restores selected dark appearance");
                 Assert(timer.Interval==300000,"Default refresh is five minutes");
-                Assert(Pump(()=>source.Calls==1),"Startup refresh runs on the message loop");
+                Assert(Pump(()=>source.Calls==1)&&!source.LastManual,"Startup refresh runs on the message loop as a timed refresh");
                 var learning=Field<ToolStripMenuItem>(context,"learningMenu");
                 Assert(!learning.Enabled&&!context.ClearLearningHistory(()=>true),"History deletion cannot overlap an active fetch");
                 refresh.PerformClick();Application.DoEvents();Assert(source.Calls==1&&!refresh.Enabled,"Refresh overlap blocked while loading");
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Background completion enables refresh");
                 Assert(learning.Enabled&&learning.DropDownItems.Count==2,"Learning status and deletion are available after refresh");
                 Assert(context.ClearLearningHistory(()=> {
-                    var task=(Task)typeof(TrayContext).GetMethod("RefreshUsage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(context,null);
+                    var task=(Task)typeof(TrayContext).GetMethod("RefreshUsage",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(context,new object[]{false});
                     Application.DoEvents();
                     return task.IsCompleted&&source.Calls==1;
                 }),"Refresh during modal deletion confirmation is blocked and deletion succeeds");
@@ -578,7 +580,7 @@ internal static class UiTests
                 Assert(dark.Checked&&popup.BackColor==darkPalette.Surface&&settings.Load()==ThemeMode.Dark,"Dark appearance can be restored without restarting");
                 signal.Set();Assert(Pump(()=>popup.Visible),"Second-instance signal opens popup");
                 Assert(Screen.FromControl(popup).WorkingArea.Contains(popup.Bounds),"Popup fits current monitor work area");
-                refresh.PerformClick();Assert(Pump(()=>source.Calls==2),"Manual refresh requests new values");
+                refresh.PerformClick();Assert(Pump(()=>source.Calls==2)&&source.LastManual,"Manual refresh requests new values as a refresh by hand");
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Manual refresh finishes");
                 popup.Close();Application.DoEvents();Assert(!popup.Visible&&!popup.IsDisposed,"Window close hides and retains tray popup");
                 var shutdown=new FormClosingEventArgs(CloseReason.WindowsShutDown,false);
@@ -587,7 +589,7 @@ internal static class UiTests
                 timer.Interval=35;
                 bool timerFired=Pump(()=>source.Calls==3);
                 Assert(timerFired,"Real timer tick triggers background refresh (calls="+source.Calls+", timer="+timer.Enabled+", refreshing="+Field<bool>(context,"refreshing")+", clearing="+Field<bool>(context,"clearingHistory")+")");
-                Application.DoEvents();Assert(source.Calls==3&&!timer.Enabled,"Timer pauses while request pending");
+                Application.DoEvents();Assert(source.Calls==3&&!timer.Enabled&&!source.LastManual,"Timer pauses while request pending, and its refresh is a timed one");
                 // Only this check uses the accelerated timer. A 35 ms restart during later
                 // asynchronous completions would request unrelated fake responses on slower CI.
                 timer.Interval=300000;
@@ -599,7 +601,7 @@ internal static class UiTests
                 var loginMenu=Field<ToolStripMenuItem>(context,"loginMenu");
                 Assert(string.Join("|",loginMenu.DropDownItems.Cast<ToolStripItem>().Select(i=>i.Text))=="Claude にログイン|Codex にログイン|Grok にログイン","Login menu lists Claude, Codex and Grok");
                 loginMenu.DropDownItems[0].PerformClick();Application.DoEvents();Assert(login.Calls==1,"Login launches cannot overlap");
-                login.Pending.SetResult(null);Assert(Pump(()=>source.Calls==4),"OAuth completion automatically refreshes usage");
+                login.Pending.SetResult(null);Assert(Pump(()=>source.Calls==4)&&source.LastManual,"OAuth completion automatically refreshes usage as a refresh by hand");
                 source.Complete();Assert(Pump(()=>popup.Visible&&loginMenu.Enabled),"Completed login restores popup and controls");
                 timer.Stop();refresh.PerformClick();Assert(Pump(()=>source.Calls==5),"Warning update is requested");
                 var high=ServiceUsage.Empty("Codex","");high.Source="オンライン";high.RecordedAt=DateTimeOffset.Now;high.Windows[0].Percent=95;high.Windows[0].ResetsAt=DateTimeOffset.Now.AddDays(1);
@@ -631,7 +633,7 @@ internal static class UiTests
                 Assert(content.AutoScrollPosition.Y==scrolled,"Display refresh preserves the warning scroll position");
                 Assert(key(Keys.Home)&&content.AutoScrollPosition.Y==0,"Home key returns to the first warning");
                 Assert(key(Keys.PageDown)&&content.AutoScrollPosition.Y<0&&key(Keys.PageUp)&&content.AutoScrollPosition.Y==0,"Page keys scroll the warning list from the focused header");
-                refreshSignal.Set();Assert(Pump(()=>source.Calls==8),"Obsidian refresh signal requests a tray refresh");
+                refreshSignal.Set();Assert(Pump(()=>source.Calls==8)&&source.LastManual,"Obsidian refresh signal requests a tray refresh by hand");
                 source.Complete();Assert(Pump(()=>refresh.Enabled),"Signaled refresh completes normally");
                 context.ExitThread();Assert(popup.IsDisposed,"Exit releases popup and tray resources");context=null;
             }
