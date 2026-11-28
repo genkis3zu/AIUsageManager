@@ -316,6 +316,27 @@ internal static partial class Tests
                 Assert(handler.Claude == 2 && value.RecordedAt == At("2026-11-28T11:00:00Z"));
             }
         });
+        Check("After the clock was set back, this app's own last result is still shown on an HTTP 429 or during a limit", () => {
+            var root = Fixture(); ClaudeLogin(root); File.WriteAllText(Path.Combine(root, ".ai-usage-shared"), "a file where the folder would be");
+            var handler = new SharedHttp(); var now = new[] { SharedNow };
+            using (var http = new HttpClient(handler, false))
+            {
+                var service = new UsageService(root, http, () => now[0]);
+                service.FetchAllAsync(CancellationToken.None, true).GetAwaiter().GetResult();
+                now[0] = At("2026-11-28T11:58:40Z"); handler.Status = (HttpStatusCode)429;
+                var value = service.FetchAllAsync(CancellationToken.None, true).GetAwaiter().GetResult()[0];
+                Assert(handler.Claude == 2 && Shows(value, 34) && value.RecordedAt == SharedNow && !value.Status.Contains("取得制限中"));
+            }
+            var limited = Fixture(); ClaudeLogin(limited); var held = new SharedHttp(); var clock = new[] { SharedNow };
+            using (var http = new HttpClient(held, false))
+            {
+                var service = new UsageService(limited, http, () => clock[0]);
+                service.FetchAllAsync(CancellationToken.None, true).GetAwaiter().GetResult();
+                clock[0] = At("2026-11-28T11:58:40Z"); PutLimit(limited, "claude", "2026-11-28T11:58:00Z", "2026-11-28T12:03:00Z");
+                var value = service.FetchAllAsync(CancellationToken.None, true).GetAwaiter().GetResult()[0];
+                Assert(held.Claude == 1 && Shows(value, 34) && value.RecordedAt == SharedNow);
+            }
+        });
         Check("Reuse ends at exactly 270 seconds for a timed refresh and 180 seconds for one by hand", () => {
             foreach (var row in new[] { new object[] { "2026-11-28T11:55:31Z", false, 0 }, new object[] { "2026-11-28T11:55:30Z", false, 1 },
                 new object[] { "2026-11-28T11:57:01Z", true, 0 }, new object[] { "2026-11-28T11:57:00Z", true, 1 } })
@@ -356,6 +377,15 @@ internal static partial class Tests
             var offset = Fixture(); ClaudeLogin(offset); PutResult(offset, "claude", "2026-11-28T20:58:00.5+09:00", OtherClaudeBody); var reuse = new SharedHttp();
             var shown = FetchAt(offset, reuse, SharedNow, false)[0];
             Assert(reuse.Claude == 0 && shown.RecordedAt == At("2026-11-28T11:58:00.5Z"));
+            foreach (var pair in new[] { new[] { "2026-11-28T11:58:00.123456789Z", "2026-11-28T11:58:00.1234567Z" }, new[] { "2026-11-28T11:58:00z", "2026-11-28T11:58:00Z" },
+                new[] { "2026-11-28T11:58Z", "2026-11-28T11:58:00Z" }, new[] { "2026-11-28T20:58:00+09", "2026-11-28T11:58:00Z" }, new[] { "2026-11-28T20:58:00+0900", "2026-11-28T11:58:00Z" } })
+            {
+                var root = Fixture(); ClaudeLogin(root); PutResult(root, "claude", pair[0], OtherClaudeBody); var handler = new SharedHttp();
+                var value = FetchAt(root, handler, SharedNow, false)[0];
+                Assert(handler.Claude == 0 && value.RecordedAt == At(pair[1]));
+            }
+            var month = Fixture(); ClaudeLogin(month); PutResult(month, "claude", "2026-13-28T11:58:00Z", OtherClaudeBody); var wrong = new SharedHttp();
+            FetchAt(month, wrong, SharedNow, false); Assert(wrong.Claude == 1);
             var ahead = Fixture(); ClaudeLogin(ahead); PutResult(ahead, "claude", "2026-11-28T12:01:00Z", OtherClaudeBody); var held = new SharedHttp();
             FetchAt(ahead, held, SharedNow, false); Assert(held.Claude == 0);
             var further = Fixture(); ClaudeLogin(further); PutResult(further, "claude", "2026-11-28T12:01:01Z", OtherClaudeBody); var calls = new SharedHttp();

@@ -11,11 +11,13 @@ class ProviderState
     std::map<std::wstring,WidgetSlot> slots_;
     bool refreshing_=false,requested_=false,byHandRequested_=false,byHand_=false;
     uint64_t next_=0;
+    // A 更新 press waiting for the next fetch is dropped once no widget is active, so a later activation is not one by hand.
+    void drop_by_hand_when_idle(){if(active_count()==0)byHandRequested_=false;}
 public:
-    void restore(std::wstring const& id,bool large,bool active){slots_[id]={large,active};requested_|=active;}
+    void restore(std::wstring const& id,bool large,bool active){slots_[id]={large,active};requested_|=active;drop_by_hand_when_idle();}
     void activate(std::wstring const& id,bool large){restore(id,large,true);}
-    void deactivate(std::wstring const& id){auto i=slots_.find(id);if(i!=slots_.end())i->second.active=false;}
-    void remove(std::wstring const& id){slots_.erase(id);}
+    void deactivate(std::wstring const& id){auto i=slots_.find(id);if(i!=slots_.end())i->second.active=false;drop_by_hand_when_idle();}
+    void remove(std::wstring const& id){slots_.erase(id);drop_by_hand_when_idle();}
     bool contains(std::wstring const& id) const{return slots_.contains(id);}
     size_t active_count() const{return static_cast<size_t>(std::count_if(slots_.begin(),slots_.end(),[](auto const& pair){return pair.second.active;}));}
     bool due(uint64_t now) const{return !refreshing_&&active_count()>0&&(requested_||now>=next_);}

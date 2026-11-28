@@ -48,6 +48,13 @@ int RunTests(int argc,wchar_t** argv)
     assert(state.begin_refresh(300003)&&state.by_hand());state.finish_refresh(300004);
     state.activate(L"hand",false);assert(state.begin_refresh(300005)&&!state.by_hand());state.finish_refresh(300006);
     state.remove(L"hand");state.request_by_hand();assert(!state.due(999999));
+    // A press during a fetch is dropped once no widget is active: closed, removed, or reported inactive.
+    state.activate(L"closed",false);assert(state.begin_refresh(400000));state.request_by_hand();state.deactivate(L"closed");state.finish_refresh(400001);
+    state.activate(L"closed",false);assert(state.begin_refresh(4000000)&&!state.by_hand());state.finish_refresh(4000001);state.remove(L"closed");
+    state.activate(L"a",false);assert(state.begin_refresh(4000002));state.request_by_hand();state.remove(L"a");state.finish_refresh(4000003);
+    state.activate(L"b",false);assert(state.begin_refresh(4000004)&&!state.by_hand());state.finish_refresh(4000005);
+    assert(state.begin_refresh(4300005));state.request_by_hand();state.restore(L"b",false,false);state.finish_refresh(4300006);
+    state.activate(L"b",false);assert(state.begin_refresh(4300007)&&!state.by_hand());state.finish_refresh(4300008);state.remove(L"b");
     std::wcout<<L"PASS widget refresh by hand only after its refresh button, also when pressed during a refresh\n";
     wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);
     assert(RunChild(path,L"--child-ok",3000).find("medium")!=std::string::npos);

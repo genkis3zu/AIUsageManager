@@ -4,7 +4,7 @@
 
 Expose Claude (5h and weekly), Codex (weekly) and Grok (weekly) in the Windows 11 Widgets Board, alongside the existing portable tray app. Existing provider files remain read-only. Credentials never enter widget JSON, command lines, files or diagnostics.
 
-The portable tray app keeps its inbox .NET Framework 4.8 architecture. An optional native C++/WinRT COM provider supplies Adaptive Cards to Windows. The provider launches the packaged copy of the existing executable with a fixed `--widget-data` argument. That headless mode reuses `UsageService`, outputs only allowlisted display cards to an anonymous pipe, and exits. It bypasses tray initialization and the tray single-instance mutex. No widget usage cache is written by the app; Windows may retain submitted card content.
+The portable tray app keeps its inbox .NET Framework 4.8 architecture. An optional native C++/WinRT COM provider supplies Adaptive Cards to Windows. The provider launches the packaged copy of the existing executable with a fixed argument: `--widget-data` for activation and the 5-minute cadence, or `--widget-refresh` for the fetch after 更新 is pressed, which the shared usage folder treats as a refresh by hand. That headless mode reuses `UsageService`, outputs only allowlisted display cards to an anonymous pipe, and exits. It bypasses tray initialization and the tray single-instance mutex. No widget usage cache is written by the app; Windows may retain submitted card content.
 
 ## Behavior
 

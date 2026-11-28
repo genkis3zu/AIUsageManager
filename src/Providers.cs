@@ -195,38 +195,37 @@ namespace AIUsageManager
             return null;
         }
         static string Limited(DateTimeOffset until) { return "取得制限中・" + until.ToLocalTime().ToString("HH:mm") + " 以降に再試行"; }
-        // A result more than 60 seconds ahead of the clock (the clock was set back) is not used, the same as a shared file (section 6).
-        SharedResult Last(string provider, DateTimeOffset now)
-        {
-            SharedResult value;
-            lock (last) if (!last.TryGetValue(provider, out value)) return null;
-            return value.FetchedAt > now.AddSeconds(60) ? null : value;
-        }
+        SharedResult Last(string provider) { lock (last) { SharedResult value; return last.TryGetValue(provider, out value) ? value : null; } }
+        // This app's own last result counts as a recent fetch only when it is not more than 60 seconds ahead of the clock,
+        // the same rule as for shared files (section 6). Otherwise, after the clock is set back, the app would stop calling.
+        static SharedResult Current(SharedResult own, DateTimeOffset now) { return own != null && own.FetchedAt <= now.AddSeconds(60) ? own : null; }
         void Remember(string provider, SharedResult value) { lock (last) last[provider] = value; }
         // Section 5 of docs/usage-shared-cache-protocol.md. Returns null when the service should be called.
         SharedDecision Decide(string provider, bool manual, DateTimeOffset now, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
         {
             var file = shared.ReadResult(provider, now);
-            var own = Last(provider, now);
+            var own = Last(provider);
+            var current = Current(own, now);
             // The last successful fetch: the shared file's, even when this app cannot read its body, or this app's own.
             DateTimeOffset? success = null;
-            if (own != null) success = own.FetchedAt;
+            if (current != null) success = current.FetchedAt;
             if (file != null && (!success.HasValue || file.FetchedAt > success.Value)) success = file.FetchedAt;
             var reuse = manual ? TimeSpan.FromSeconds(180) : TimeSpan.FromSeconds(Math.Max(180, (RefreshInterval - TimeSpan.FromSeconds(30)).TotalSeconds));
-            if (success.HasValue && now - success.Value < reuse) return new SharedDecision { Use = Newest(file, own, parse) };
+            if (success.HasValue && now - success.Value < reuse) return new SharedDecision { Use = Shown(file, own, now, parse) };
             var limit = shared.ReadRateLimit(provider, now);
             if (limit == null || limit.Until <= now) return null;
             // A success after the HTTP 429 shows the limit is over.
             if (success.HasValue && success.Value >= limit.ObservedAt) return null;
-            return new SharedDecision { Use = Newest(file, own, parse), Until = limit.Until };
+            return new SharedDecision { Use = Shown(file, own, now, parse), Until = limit.Until };
         }
-        // The result to show: the newer of the shared file and this app's own last result, using the file only when
-        // this app can read its body. A file it cannot read is shown only when there is nothing else, and then looks
-        // the same as an unreadable answer to this app's own call (section 6).
-        static SharedResult Newest(SharedResult file, SharedResult own, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
+        // The result to show (sections 5 and 6): the newer of a shared file this app can read and its own last result.
+        // Its own result from before the clock was set back is shown when there is nothing newer it can read. A shared
+        // file it cannot read is shown only when there is nothing else, and then looks like an unreadable answer to its own call.
+        static SharedResult Shown(SharedResult file, SharedResult own, DateTimeOffset now, Func<Dictionary<string, object>, DateTimeOffset, ServiceUsage> parse)
         {
-            if (file != null && (own == null || file.FetchedAt > own.FetchedAt) && parse(file.Body, file.FetchedAt).HasData) return file;
-            return own ?? file;
+            var current = Current(own, now);
+            if (file != null && (current == null || file.FetchedAt > current.FetchedAt) && parse(file.Body, file.FetchedAt).HasData) return file;
+            return current ?? own ?? file;
         }
         // Calls the service only when the shared folder has no recent result and no limit, and leaves what it got there.
         // Returns the usage to show, or null with the reason put in failure.
@@ -242,7 +241,7 @@ namespace AIUsageManager
                 shared.WriteRateLimit(provider, response.ReceivedAt, until);
                 // Another app may have fetched just before this call was refused: show the newest result there is.
                 var now = clock();
-                var newest = Newest(shared.ReadResult(provider, now), Last(provider, now), parse);
+                var newest = Shown(shared.ReadResult(provider, now), Last(provider), now, parse);
                 if (newest != null) return Show(provider, newest, parse);
                 failure.Error = Limited(until); return null;
             }
